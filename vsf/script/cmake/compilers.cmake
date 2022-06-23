@@ -1,0 +1,15 @@
+if(${VSF_ARCH_SERIES} STREQUAL "arm")
+    include(${VSF_CMAKE_ROOT}/compilers/gnuarmemb.cmake)
+elseif(${VSF_ARCH_SERIES} STREQUAL "x86")
+elseif(${VSF_ARCH_SERIES} STREQUAL "x64")
+else()
+    message(FATAL_ERROR "ARCH ${VSF_ARCH_SERIES} not supported yet")
+endif()
+
+if(("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang") OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fms-extensions -fdiagnostics-color=always")
+
+    foreach(api ${VSF_TARGET_WRAPPER_LIST})
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,--wrap=${api}")
+    endforeach()
+endif()
