@@ -1,0 +1,911 @@
+#ifndef __SIMPLE_LIBC_STRING__
+#define __SIMPLE_LIBC_STRING__
+
+#include <string.h>
+#include <wchar.h>
+#include <memory>
+#include <iosfwd>
+
+namespace std {
+    template <class T>
+    size_t __strlen(const T *str)
+    {
+        size_t result = 0;
+        for (; str[result]; result++);
+        return result;
+    }
+
+    template <class T>
+    T * __strcpy(T *dst, const T *src)
+    {
+        T *result = dst;
+        while ((*dst++ = *src++) != 0);
+        return result;
+    }
+
+    template <class T>
+    T * __strchr(const T *str, T c)
+    {
+        T ch;
+        while ((ch = *str) != '\0') {
+            if (ch == c) {
+                return (T *)str;
+            }
+            str++;
+        }
+        return NULL;
+    }
+
+    template <class T>
+    static T * __strstr(const T *s1, const T *s2)
+    {
+        size_t l1, l2;
+        l2 = __strlen(s2);
+        if (!l2) { return (T *)s1; }
+        l1 = __strlen(s1);
+        while (l1 >= l2) {
+            l1--;
+            if (!__memcmp(s1, s2, l2)) {
+                return (T *)s1;
+            }
+            s1++;
+        }
+        return NULL;
+    }
+
+    template <class T>
+    T * __memcpy(T *dst, const T *src, size_t count)
+    {
+        return (T *)memcpy((void *)dst, (void *)src, count * sizeof(T));
+    }
+
+    template <class T>
+    T * __memmove(T *dst, const T *src, size_t count)
+    {
+        return (T *)memmove((void *)dst, (void *)src, count * sizeof(T));
+    }
+
+    template <class T>
+    int __memcmp(const T *dst, const T *src, size_t count)
+    {
+        return memcmp((const void *)dst, (const void *)src, count * sizeof(T));
+    }
+
+    template <class T>
+    T * __memset(T *dst, T t, size_t n)
+    {
+        T *tmp = dst;
+        while (n) {
+            *tmp++ = n;
+        }
+        return dst;
+    }
+
+    template <class T>
+    class array_base {
+    public:
+        typedef T *iterator;
+        typedef const T *const_iterator;
+        typedef T &reference;
+        typedef const T &const_reference;
+        typedef size_t size_type;
+
+        array_base<T>(const T *arr, size_t num)
+            : __length(num)
+        {
+            if (__length > 0) {
+                __array = (T *)malloc(__length * sizeof(T));
+                VSF_ASSERT(__array != nullptr);
+                if (arr != nullptr) {
+                    __memcpy<T>(__array, arr, __length);
+                }
+            } else {
+                __array = nullptr;
+            }
+        }
+        array_base<T>(size_t num)
+            : array_base<T>(nullptr, num) { }
+        array_base<T>(const array_base &arr)
+            : array_base<T>(arr.__array, arr.__length) { }
+        ~array_base<T>()
+        {
+            __length = 0;
+            if (__array != nullptr) {
+                free(__array);
+                __array = nullptr;
+            }
+        }
+
+        bool empty() const
+        {
+            return (0 == __length);
+        }
+        const T & at(size_t pos) const
+        {
+            VSF_ASSERT(pos < __length);
+            return __array[pos];
+        }
+        const T & back() const
+        {
+            return at(__length);
+        }
+        const T & front() const
+        {
+            return at(0);
+        }
+        size_t size() const
+        {
+            return __length * sizeof(T);
+        }
+        size_t length() const
+        {
+            return __length;
+        }
+        void resize(size_t n)
+        {
+            if (__length != n) {
+                __array = (T *)realloc(__array, n * sizeof(T));
+                if (n > 0) {
+                    VSF_ASSERT(__array != nullptr);
+                }
+                __length = n;
+            }
+        }
+        array_base<T> & append(const T *arr, size_t num)
+        {
+            if (arr != nullptr && num != 0) {
+                __array = (T *)realloc(__array, (__length + num) * sizeof(T));
+                VSF_ASSERT(__array != nullptr);
+                __memcpy(&__array[__length], arr, num);
+                __length += num;
+            }
+            return (*this);
+        }
+        array_base<T> & append(const array_base<T> &arr)
+        {
+            return append(arr.__array, arr.__length);
+        }
+        array_base<T> & assign(const T *arr, size_t num)
+        {
+            if (this->__array == arr) { return (*this); }
+
+            __array = (T *)realloc(__array, num * sizeof(T));
+            if (num > 0) {
+                VSF_ASSERT(__array != nullptr);
+            }
+            __length = num;
+            __memcpy(__array, arr, __length);
+            return (*this);
+        }
+        array_base<T> & assign(const array_base<T> &arr)
+        {
+            if (this == &arr) { return (*this); }
+            return assign(arr.__array, arr.__length);
+        }
+        void clear()
+        {
+            assign((const T *)nullptr, 0);
+        }
+        void swap(array_base<T> &arr)
+        {
+            T * array = arr.__array;
+            size_t length = arr.__length;
+            arr.__array = __array;
+            arr.__length = __length;
+            __array = array;
+            __length = length;
+        }
+        array_base<T> & replace(size_t pos, size_t len, const T *arr, size_t sublen)
+        {
+            if (sublen && !arr) {
+                assert(false);
+            }
+
+            size_t newlen = __length + sublen - len;
+            if (pos + len > __length) {
+                len = __length - pos;
+            }
+            if (sublen > len) {
+                __array = (T *)realloc(__array, newlen * sizeof(T));
+                VSF_ASSERT(__array != nullptr);
+            }
+            __memmove(&__array[pos + sublen], &__array[pos + len], __length - pos - len);
+            if (arr != nullptr) {
+                __memcpy(&__array[pos], arr, sublen);
+            }
+            if (sublen < len) {
+                __array = (T *)realloc(__array, newlen * sizeof(T));
+                if (newlen > 0) {
+                    VSF_ASSERT(__array != nullptr);
+                }
+            }
+            __length = newlen;
+            return (*this);
+        }
+        array_base<T> & replace(size_t pos, size_t len, size_t n, T t)
+        {
+            size_t newlen = __length + n - len;
+            if (pos + len > __length) {
+                len = __length - pos;
+            }
+            if (n > len) {
+                __array = (T *)realloc(__array, newlen * sizeof(T));
+                VSF_ASSERT(__array != nullptr);
+            }
+            __memmove(&__array[pos + len], &__array[pos + n], __length - pos - len);
+            __memset(&__array[pos], t, n);
+            if (n < len) {
+                __array = (T *)realloc(__array, newlen * sizeof(T));
+                if (newlen > 0) {
+                    VSF_ASSERT(__array != nullptr);
+                }
+            }
+            __length = newlen;
+            return (*this);
+        }
+        array_base<T> & insert(size_t pos, const T *arr, size_t sublen)
+        {
+            return replace(pos, 0, arr, sublen);
+        }
+        array_base<T> & insert(size_t pos, size_t n, T t)
+        {
+            return replace(pos, 0, n, t);
+        }
+        array_base<T> & erase(size_t pos, size_t len)
+        {
+            return replace(pos, len, nullptr, 0);
+        }
+
+        iterator begin() const
+        {
+            return __array == nullptr ? (iterator)nullptr : &__array[0];
+        }
+        iterator end() const
+        {
+            return __array == nullptr ? (iterator)nullptr : &__array[__length];
+        }
+        const_iterator cbegin() const
+        {
+            return (const_iterator)begin();
+        }
+        const_iterator cend() const
+        {
+            return (const_iterator)end();
+        }
+        iterator rbegin() const
+        {
+            return __length > 0 ? &__array[__length - 1] : NULL;
+        }
+        iterator rend() const
+        {
+            return __length > 0 ? &__array[-1] : NULL;
+        }
+        const_iterator crbegin() const
+        {
+            return (const_iterator)rbegin();
+        }
+        const_iterator crend() const
+        {
+            return (const_iterator)rend();
+        }
+
+        const T & operator [](size_t pos) const
+        {
+            return at(pos);
+        }
+        bool operator ==(array_base<T> &arr) const
+        {
+            return (__length == arr.__length) && !__memcmp(__array, arr.__array, __length);
+        }
+
+    private:
+        T * __array;
+        size_t __length;
+    };
+
+    template <class T, class IntT>
+    struct _char_traits {
+        typedef T char_type;
+        typedef IntT int_type;
+        typedef streamoff off_type;
+        typedef streampos pos_type;
+        typedef mbstate_t state_type;
+
+        static void assign(T &c1, T &c2)
+        {
+            c1 = c2;
+        }
+        static T * assign(T *s, size_t n, T c)
+        {
+            __memset(s, c, n);
+            return s;
+        }
+        static bool eq(const T &c1, const T &c2)
+        {
+            return c1 == c2;
+        }
+        static bool lt(const T &c1, const T &c2)
+        {
+            return c1 < c2;
+        }
+        static int compare(const T *s1, const T *s2, size_t n)
+        {
+            return __memcmp(s1, s2, n);
+        }
+        static size_t length(const T *s)
+        {
+            return s != nullptr ? __strlen(s) : 0;
+        }
+        static const T * find(const T *s, size_t n, const T & c)
+        {
+            for (size_t i = 0; i < n; i++, s++) {
+                if (*s == c) {
+                    return s;
+                }
+            }
+            return nullptr;
+        }
+        static T * move(T *s1, const T *s2, size_t n)
+        {
+            return __memmove(s1, s2, n);
+        }
+        static T * copy(T *s1, const T *s2, size_t n)
+        {
+            return __memcpy(s1, s2, n);
+        }
+        static T to_char_type(const int_type &i)
+        {
+            return static_cast<T>(i);
+        }
+        static int_type to_int_type(const T &c)
+        {
+            return static_cast<int_type>(c);
+        }
+        static bool eq_int_type(const int_type &left, const int_type &right)
+        {
+            return left == right;
+        }
+        static int_type eof()
+        {
+            return static_cast<int_type>(EOF);
+        }
+        static int_type not_eof(const int_type &i)
+        {
+            int_type e = eof();
+            return i != e ? i : !e;
+        }
+    };
+
+    template <class T>
+    struct char_traits : _char_traits<T, long> {};
+    template <>
+    struct char_traits<char> : _char_traits<char, int> {};
+    template <>
+    struct char_traits<wchar_t> : _char_traits<wchar_t, wint_t> {};
+
+    template <class T, class Traits = char_traits<T>, class Alloc = allocator<T>>
+    class basic_string : public array_base<T> {
+    public:
+        typedef Traits traits_type;
+        typedef Alloc allocator_type;
+
+        typedef T value_type;
+        typedef size_t size_type;
+        typedef ptrdiff_t difference_type;
+        typedef T * pointer;
+        typedef const T * const_pointer;
+        typedef T & reference;
+        typedef const T & const_reference;
+
+        typedef T * iterator;
+        typedef const T * const_iterator;
+        typedef std::reverse_iterator<iterator> reverse_iterator;
+        typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+
+        static const size_t npos = -1;
+
+        basic_string<T, Traits, Alloc>(const T *str)
+            : array_base<T>(str, nullptr == str ? 0 : __strlen(str) + 1) { }
+        basic_string<T, Traits, Alloc>(const basic_string<T, Traits, Alloc> &s)
+            : array_base<T>(s) { }
+        basic_string<T, Traits, Alloc>(size_t len)
+            : array_base<T>(nullptr, len + 1) { }
+        basic_string<T, Traits, Alloc>()
+            : array_base<T>(nullptr, 0) { }
+        basic_string<T, Traits, Alloc>(const T *arr, size_t num)
+            : array_base<T>(arr, num) { }
+        basic_string<T, Traits, Alloc>(size_t n, T c, const allocator_type &a = allocator_type())
+            : array_base<T>(n)
+        {
+            __memset((T *)c_str(), c, n);
+        }
+        explicit basic_string<T, Traits, Alloc>(const Alloc &a)
+            : array_base<T>(nullptr, 0) { }
+
+        iterator begin() const
+        {
+            return array_base<T>::begin();
+        }
+        iterator end() const
+        {
+            iterator it = array_base<T>::end();
+            return it != NULL ? it - 1 : NULL;
+        }
+        const_iterator cbegin() const
+        {
+            return (const_iterator)begin();
+        }
+        const_iterator cend() const
+        {
+            return (const_iterator)end();
+        }
+        iterator rbegin() const
+        {
+            iterator it = array_base<T>::rbegin();
+            return it != NULL ? it - 1 : NULL;
+        }
+        iterator rend() const
+        {
+            return array_base<T>::rend();
+        }
+        const_iterator crbegin() const
+        {
+            return (const_iterator)rbegin();
+        }
+        const_iterator crend() const
+        {
+            return (const_iterator)rend();
+        }
+
+        size_t size() const
+        {
+            return length();
+        }
+        size_t length() const
+        {
+            size_t len = array_base<T>::length();
+            return len > 0 ? len - 1 : 0;
+        }
+        bool empty() const
+        {
+            return (0 == length());
+        }
+        void resize(size_t n, T c = 0)
+        {
+            size_t origlen = length();
+            array_base<T>::resize(n + 1);
+            T *s = (T *)c_str();
+            s[n] = T(0);
+            __memset(&s[origlen], c, n);
+        }
+        size_t capacity() const
+        {
+            return array_base<T>::size();
+        }
+        const T * data() const
+        {
+            return array_base<T>::cbegin();
+        }
+        basic_string<T, Traits, Alloc> & assign(const T *arr, size_t num)
+        {
+            array_base<T>::assign(arr, num + 1);
+            T *end = (T *)array_base<T>::rbegin();
+            *end = T(0);
+            return (*this);
+        }
+        basic_string<T, Traits, Alloc> & assign(const basic_string<T, Traits, Alloc> &str)
+        {
+            return assign(str.c_str(), str.length());
+        }
+        basic_string<T, Traits, Alloc> & assign(const T *str)
+        {
+            if (str != nullptr) {
+                return assign(str, __strlen(str));
+            }
+            return (*this);
+        }
+        basic_string<T, Traits, Alloc> & append(const T *arr, size_t num)
+        {
+            array_base<T>::append(arr, num);
+            return (*this);
+        }
+        basic_string<T, Traits, Alloc> & append(const T *str)
+        {
+            if (str != nullptr) {
+                size_t size = __strlen(str);
+                if (size > 0) {
+                    array_base<T>::append(str, size);
+                }
+            }
+            return (*this);
+        }
+        basic_string<T, Traits, Alloc> & append(const basic_string<T, Traits, Alloc> &str)
+        {
+            return append(str.c_str());
+        }
+        basic_string<T, Traits, Alloc> & append(size_t n, T c)
+        {
+            return (basic_string<T, Traits, Alloc> &)(array_base<T>::insert(length(), n, c));
+        }
+        int compare(const basic_string<T, Traits, Alloc> & right) const
+        {
+            size_t lsize = length(), rsize = right.length();
+            size_t len = vsf_min(lsize, rsize) + 1;
+            return Traits::compare(c_str(), right.c_str(), len);
+        }
+        basic_string<T, Traits, Alloc> & substr(size_t start = 0, size_t count = npos) const
+        {
+            size_t len = length();
+            if (start >= len) {
+                count = 0;
+            }
+            if ((count == npos) || (start + count > len)) {
+                count = len - start;
+            }
+
+            const T *sub = array_base<T>::cbegin();
+            basic_string<T, Traits, Alloc> *newstr = new basic_string<T, Traits, Alloc>(&sub[start], count + 1);
+            T *n = (T *)newstr->c_str();
+            n[count] = T(0);
+            return (*newstr);
+        }
+        size_t find(const T *str, size_t pos = 0) const
+        {
+            const T *start = c_str();
+            if (pos < length()) {
+                T *found = __strstr(start + pos, str);
+                if (found) {
+                    return (found - start) / sizeof(T);
+                }
+            }
+            return npos;
+        }
+        size_t find(const basic_string<T, Traits, Alloc> &str, size_t pos = 0) const
+        {
+            return find(str.c_str(), pos);
+        }
+        size_t find(T c, size_t pos = 0) const
+        {
+            T str[2] = { c, T(0) };
+            return find(str, pos);
+        }
+
+        basic_string<T, Traits, Alloc> & replace(size_t pos, size_t len, const T *str, size_t sublen = -1)
+        {
+            size_t curlen = length();
+            if (nullptr == str) {
+                sublen = 0;
+            } else {
+                sublen = vsf_min(sublen, __strlen(str));
+            }
+            if (pos > curlen) {
+                assert(false);
+//                throw out_of_range("out of range");
+            }
+            return (basic_string<T, Traits, Alloc> &)array_base<T>::replace(pos, len, str, sublen);
+        }
+        basic_string<T, Traits, Alloc> & replace(size_t pos, size_t len, const basic_string<T, Traits, Alloc> &str, size_t subpos = 0, size_t sublen = -1)
+        {
+            if (subpos > str.length()) {
+                assert(false);
+//                throw out_of_range("out of range");
+            }
+            return replace(pos, len, str.c_str() + subpos, sublen);
+        }
+        basic_string<T, Traits, Alloc> & erase(size_t pos = 0, size_t len = npos)
+        {
+            if (len == npos) {
+                len = length() - pos;
+            }
+            return replace(pos, len, nullptr, 0);
+        }
+        const T * erase(const T *first, const T *last)
+        {
+            ssize_t pos = first - c_str();
+            ssize_t pos_end = last - c_str();
+            if (    (pos < 0 || pos > length())
+                ||  (pos_end < 0 || pos_end > length())
+                ||  (first >= last)) {
+                return end();
+            }
+            replace(pos, pos_end - pos, NULL, 0).begin();
+            return c_str() + pos;
+        }
+
+        size_t find_first_of(const T *str, size_t pos = 0) const
+        {
+            const T *start = c_str();
+            ssize_t curpos = pos, slen = length();
+            if (pos >= slen) {
+                return npos;
+            }
+
+            while (curpos < slen) {
+                if (__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos++;
+            }
+            return curpos < slen ? curpos : npos;
+        }
+        size_t find_first_of(const basic_string<T, Traits, Alloc> & str, size_t pos = 0) const
+        {
+            return find_first_of(str.c_str(), pos);
+        }
+        size_t find_first_of(char c, size_t pos = 0) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_first_of(str, pos);
+        }
+        size_t find_first_not_of(const T *str, size_t pos = 0) const
+        {
+            const T *start = c_str();
+            ssize_t curpos = pos, slen = length();
+            if (pos >= slen) {
+                return npos;
+            }
+
+            while (curpos < slen) {
+                if (!__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos++;
+            }
+            return curpos < slen ? curpos : npos;
+        }
+        size_t find_first_not_of(const basic_string<T, Traits, Alloc> & str, size_t pos = 0) const
+        {
+            return find_first_not_of(str.c_str(), pos);
+        }
+        size_t find_first_not_of(char c, size_t pos = 0) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_first_not_of(str, pos);
+        }
+
+        size_t find_last_of(const T *str, size_t pos = npos) const
+        {
+            const T *start = c_str();
+            if (nullptr == start) {
+                assert(false);
+            }
+
+            ssize_t curpos = length() - 1;
+            if (pos > curpos) {
+                pos = curpos;
+            }
+
+            while (curpos >= 0) {
+                if (__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos--;
+            }
+            return curpos >= 0 ? curpos : npos;
+        }
+        size_t find_last_of(const basic_string<T, Traits, Alloc> & str, size_t pos = npos) const
+        {
+            return find_last_of(str.c_str(), pos);
+        }
+        size_t find_last_of(char c, size_t pos = npos) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_last_of(str, pos);
+        }
+        size_t find_last_not_of(const T *str, size_t pos = npos) const
+        {
+            const T *start = c_str();
+            if (nullptr == start) {
+                return npos;
+            }
+
+            ssize_t curpos = length() - 1;
+            if (pos > curpos) {
+                pos = curpos;
+            }
+
+            while (curpos >= 0) {
+                if (!__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos--;
+            }
+            return curpos >= 0 ? curpos : npos;
+        }
+        size_t find_last_not_of(const basic_string<T, Traits, Alloc> & str, size_t pos = npos) const
+        {
+            return find_last_not_of(str.c_str(), pos);
+        }
+        size_t find_last_not_of(char c, size_t pos = npos) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_last_not_of(str, pos);
+        }
+
+        basic_string<T, Traits, Alloc> & operator =(const T *s)
+        {
+            size_t size = (nullptr == s) ? 1 : __strlen(s) + 1;
+            return (basic_string<T, Traits, Alloc> &)(array_base<T>::assign(s, size));
+        }
+        basic_string<T, Traits, Alloc> & operator =(const basic_string<T, Traits, Alloc> &s)
+        {
+            return operator =(s.c_str());
+        }
+        basic_string<T, Traits, Alloc> & operator +=(const T *s)
+        {
+            size_t inslen = s != nullptr ? __strlen(s) : 0;
+            size_t len = length();
+            if (0 == len) {
+                return assign(s);
+            } else {
+                return (basic_string<T, Traits, Alloc> &)(array_base<T>::insert(len - 1, s, inslen));
+            }
+        }
+        basic_string<T, Traits, Alloc> & operator +=(const basic_string<T, Traits, Alloc> &s)
+        {
+            return operator +=(s.c_str());
+        }
+        basic_string<T, Traits, Alloc> & operator +(const T *s) const
+        {
+            size_t curlen = length(), appendlen = s != nullptr ? __strlen(s) : 0;
+            basic_string<T, Traits, Alloc> *newstr = new basic_string<T, Traits, Alloc>(curlen + appendlen);
+            T *start = (T *)newstr->c_str();
+            __memcpy(start, array_base<T>::begin(), curlen);
+            __memcpy(start + curlen, s, appendlen);
+            start[curlen + appendlen] = T(0);
+            return (*newstr);
+        }
+        basic_string<T, Traits, Alloc> & operator +(const T c) const
+        {
+            const T tmp[2] = { c, T(0) };
+            return operator +(tmp);
+        }
+        basic_string<T, Traits, Alloc> & operator +(const basic_string<T, Traits, Alloc> &s) const
+        {
+            return operator +(s.c_str());
+        }
+        bool operator ==(const T *str) const
+        {
+            size_t arrlen = str != nullptr ? __strlen(str) : 0;
+            return (length() == arrlen) && !__memcmp(c_str(), str, arrlen);
+        }
+        bool operator ==(const basic_string<T, Traits, Alloc> &str) const
+        {
+            return operator ==(str.c_str());
+        }
+        bool operator !=(const T *str) const
+        {
+            return !operator ==(str);
+        }
+        bool operator !=(const basic_string<T, Traits, Alloc> &str) const
+        {
+            return !operator ==(str);
+        }
+        bool operator >(const T *str) const
+        {
+            size_t slen = str != nullptr ? __strlen(str) : 0;
+            size_t arrlen = vsf_min(slen, length());
+            return __memcmp(c_str(), str, arrlen) > 0;
+        }
+        bool operator >(const basic_string<T, Traits, Alloc> &str) const
+        {
+            return operator >(str.c_str());
+        }
+        bool operator <(const T *str) const
+        {
+            size_t slen = str != nullptr ? __strlen(str) : 0;
+            size_t arrlen = vsf_min(slen, length());
+            return __memcmp(c_str(), str, arrlen) < 0;
+        }
+        bool operator <(const basic_string<T, Traits, Alloc> &str) const
+        {
+            return operator <(str.c_str());
+        }
+        T & operator [](size_t pos)
+        {
+            return (T &)array_base<T>::operator [](pos);
+        }
+        const T & operator [](size_t pos) const
+        {
+            return array_base<T>::operator [](pos);
+        }
+
+        void push_back(T c)
+        {
+            append(1, c);
+        }
+        void pop_back()
+        {
+            size_t len = length();
+            if (len > 0) {
+                array_base<T>::replace(len - 1, 1, NULL, 0);
+            }
+        }
+        const T * c_str() const
+        {
+            return array_base<T>::cbegin();
+        }
+    };
+
+    // char + string, char * + string
+    template <class T, class Traits = char_traits<T>, class Alloc = allocator<T>>
+    basic_string<T, Traits, Alloc> & operator +(const T * const left, const basic_string<T, Traits, Alloc> &right)
+    {
+        size_t leftlen = left != nullptr ? __strlen(left) : 0;
+        size_t rightlen = right.length();
+        size_t len = leftlen + rightlen;
+        basic_string<T, Traits, Alloc> *newstr = new basic_string<T, Traits, Alloc>(len);
+        T *start = (T *)newstr->c_str();
+        __memcpy(start, left, leftlen);
+        __memcpy(start + leftlen, right.c_str(), rightlen);
+        start[len] = T(0);
+        return (*newstr);
+    }
+    template <class T, class Traits = char_traits<T>, class Alloc = allocator<T>>
+    basic_string<T, Traits, Alloc> & operator +(const T left, const basic_string<T, Traits, Alloc> &right)
+    {
+        const T str[2] = { left, T(0) };
+        return operator +(str, right);
+    }
+
+    // ostream << string
+    template <class T, class Traits, class Alloc>
+    basic_ostream<T, Traits> & operator<<(basic_ostream<T, Traits> &ostream, const basic_string<T, Traits, Alloc> &str) {
+        return operator <<(ostream, str.c_str());
+    }
+
+#ifdef __WIN__
+    // hash<string>
+    template <class T, class Traits, class Alloc>
+    struct hash<basic_string<T, Traits, Alloc>> {
+        typedef basic_string<T, Traits, Alloc> argument_type;
+        typedef size_t result_type;
+        size_t operator()(const basic_string<T, Traits, Alloc> &key) const noexcept {
+            return _Hash_array_representation(key.c_str(), key.size());
+        }
+    };
+#endif
+
+    typedef basic_string<char, char_traits<char>, allocator<char>> string;
+    typedef basic_string<wchar_t, char_traits<wchar_t>, allocator<wchar_t>> wstring;
+
+    // to_string
+    string to_string(int value);
+    string to_string(long value);
+    string to_string(long long value);
+    string to_string(unsigned value);
+    string to_string(unsigned long value);
+    string to_string(unsigned long long value);
+    string to_string(float value);
+    string to_string(double value);
+    string to_string(long double value);
+    // to_wstring
+    wstring to_wstring(int value);
+    wstring to_wstring(long value);
+    wstring to_wstring(long long value);
+    wstring to_wstring(unsigned value);
+    wstring to_wstring(unsigned long value);
+    wstring to_wstring(unsigned long long value);
+    wstring to_wstring(float value);
+    wstring to_wstring(double value);
+    wstring to_wstring(long double value);
+    // stox
+    float stof(const string &str, size_t *idx = 0);
+    float stof(const wstring &str, size_t *idx = 0);
+    double stod(const string &str, size_t *idx = 0);
+    double stod(const wstring &str, size_t *idx = 0);
+    long double stold (const string &str, size_t *idx = 0);
+    long double stold (const wstring &str, size_t *idx = 0);
+    int stoi(const string &str, size_t *idx = 0, int base = 10);
+    int stoi(const wstring &str, size_t *idx = 0, int base = 10);
+    long stol(const string &str, size_t *idx = 0, int base = 10);
+    long stol(const wstring &str, size_t *idx = 0, int base = 10);
+    long long stoll(const string &str, size_t *idx = 0, int base = 10);
+    long long stoll(const wstring &str, size_t *idx = 0, int base = 10);
+    unsigned long stoul(const string &str, size_t *idx = 0, int base = 10);
+    unsigned long stoul(const wstring &str, size_t *idx = 0, int base = 10);
+    unsigned long long stoull(const string &str, size_t *idx = 0, int base = 10);
+    unsigned long long stoull(const wstring &str, size_t *idx = 0, int base = 10);
+}
+
+#endif      // __SIMPLE_LIBC_STRING__
