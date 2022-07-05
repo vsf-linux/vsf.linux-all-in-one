@@ -1,0 +1,3878 @@
+ ch.c       |  56 +++++++++++
+ charset.c  |  82 +++++++++++++--
+ cmdbuf.c   | 143 ++++++++++++++++++++++++++
+ command.c  | 127 ++++++++++++++++++++---
+ cvt.c      |   4 +
+ decode.c   |  70 ++++++++++++-
+ edit.c     |  30 ++++++
+ filename.c |  39 ++++++-
+ forwback.c |  55 ++++++++++
+ ifile.c    |  30 ++++++
+ input.c    |  16 +++
+ jump.c     |  10 ++
+ less.h     | 185 ++++++++++++++++++++++++++++++++++
+ line.c     | 159 ++++++++++++++++++++++++++++-
+ linenum.c  |  41 ++++++++
+ lsystem.c  |   5 +
+ main.c     | 103 +++++++++++++++++++
+ mark.c     |  34 +++++++
+ optfunc.c  |  67 ++++++++++++-
+ option.c   |  36 +++++++
+ opttbl.c   | 335 ++++++++++++++++++++++++++++++++++++++-----------------------
+ os.c       |  36 +++++++
+ output.c   |  44 +++++++-
+ pattern.c  |   6 ++
+ position.c |  22 ++++
+ prompt.c   |  48 +++++++++
+ regexp.c   |  36 +++++++
+ screen.c   | 191 +++++++++++++++++++++++++++++++++++
+ search.c   |  63 ++++++++++++
+ signal.c   |  14 +++
+ tags.c     |  67 ++++++++++---
+ ttyin.c    |  10 ++
+ version.c  |   2 +-
+ 33 files changed, 1996 insertions(+), 170 deletions(-)
+
+diff --git a/ch.c b/ch.c
+index bfad09c..b0b1edc 100644
+--- a/ch.c
++++ b/ch.c
+@@ -32,7 +32,11 @@ extern ino_t curr_ino;
+ 
+ typedef POSITION BLOCKNUM;
+ 
++#ifdef __VSF__
++#	define ignore_eoi			(less_public_ctx->__ignore_eoi)
++#else
+ public int ignore_eoi;
++#endif
+ 
+ /*
+  * Pool of buffers holding the most recently used blocks of the input file.
+@@ -124,6 +128,25 @@ struct filestate {
+ 	thisfile->hashtbl[h].hnext->hprev = (bn); \
+ 	thisfile->hashtbl[h].hnext = (bn);
+ 
++#ifdef __VSF__
++#	define thisfile				(less_ch_ctx->__thisfile)
++#	define ch_ungotchar			(less_ch_ctx->__ch_ungotchar)
++#	define maxbufs				(less_ch_ctx->__maxbufs)
++
++#	define autobuf				(less_public_ctx->__autobuf)
++#	define sigs					(less_public_ctx->__sigs)
++#	define secure				(less_public_ctx->__secure)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define follow_mode			(less_public_ctx->__follow_mode)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#if LOGFILE
++#	define logfile				(less_public_ctx->__logfile)
++#	define namelogfile			(less_public_ctx->__namelogfile)
++#endif
++
++extern constant char helpdata[];
++extern constant int size_helpdata;
++#else
+ static struct filestate *thisfile;
+ static int ch_ungotchar = -1;
+ static int maxbufs = -1;
+@@ -140,6 +163,32 @@ extern IFILE curr_ifile;
+ extern int logfile;
+ extern char *namelogfile;
+ #endif
++#endif
++
++#ifdef __VSF__
++struct __less_ch_ctx {
++	struct filestate *__thisfile;
++	int __ch_ungotchar;			// = -1;
++	int __maxbufs;				// = -1;
++#if LOGFILE
++	struct {
++		int __tried;
++	} end_logfile;
++#endif
++};
++static void __less_ch_mod_init(void *ctx)
++{
++	struct __less_ch_ctx *__less_ch_ctx = ctx;
++	__less_ch_ctx->__ch_ungotchar = -1;
++	__less_ch_ctx->__maxbufs = -1;
++}
++define_vsf_less_mod(less_ch,
++	sizeof(struct __less_ch_ctx),
++	VSF_LESS_MOD_CH,
++	__less_ch_mod_init
++)
++#	define less_ch_ctx			((struct __less_ch_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_ch)))
++#endif
+ 
+ static int ch_addbuf();
+ 
+@@ -392,7 +441,11 @@ ch_ungetchar(c)
+ 	public void
+ end_logfile(VOID_PARAM)
+ {
++#ifdef __VSF__
++#	define tried				(less_ch_ctx->end_logfile.__tried)
++#else
+ 	static int tried = FALSE;
++#endif
+ 
+ 	if (logfile < 0)
+ 		return;
+@@ -408,6 +461,9 @@ end_logfile(VOID_PARAM)
+ 	logfile = -1;
+ 	free(namelogfile);
+ 	namelogfile = NULL;
++#ifdef __VSF__
++#	undef tried
++#endif
+ }
+ 
+ /*
+diff --git a/charset.c b/charset.c
+index 5e9a2d6..8d1701f 100644
+--- a/charset.c
++++ b/charset.c
+@@ -27,9 +27,15 @@
+ #include <windows.h>
+ #endif
+ 
++#ifdef __VSF__
++#	define bs_mode				(less_public_ctx->__bs_mode)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#	define charsets				(less_charset_ctx->__charsets)
++#else
+ extern int bs_mode;
+ 
+ public int utf_mode = 0;
++#endif
+ 
+ /*
+  * Predefined character sets,
+@@ -39,9 +45,18 @@ struct charset {
+ 	char *name;
+ 	int *p_flag;
+ 	char *desc;
+-} charsets[] = {
++}
++#ifdef __VSF__
++static const __charsets[] = {
++#else
++charsets[] = {
++#endif
+ 		{ "ascii",              NULL,       "8bcccbcc18b95.b" },
++#ifdef __VSF__
++		{ "utf-8",              NULL,       "8bcccbcc18b95.b126.bb" },
++#else
+ 		{ "utf-8",              &utf_mode,  "8bcccbcc18b95.b126.bb" },
++#endif
+ 		{ "iso8859",            NULL,       "8bcccbcc18b95.33b." },
+ 		{ "latin3",             NULL,       "8bcccbcc18b95.33b5.b8.b15.b4.b12.b18.b12.b." },
+ 		{ "arabic",             NULL,       "8bcccbcc18b95.33b.3b.7b2.13b.3b.b26.5b19.b" },
+@@ -118,11 +133,46 @@ struct cs_alias {
+ #define IS_BINARY_CHAR  01
+ #define IS_CONTROL_CHAR 02
+ 
++#ifdef __VSF__
++#	define chardef				(less_charset_ctx->__chardef)
++#	define binfmt				(less_charset_ctx->__binfmt)
++#	define utfbinfmt			(less_charset_ctx->__utfbinfmt)
++
++#	define binattr				(less_public_ctx->__binattr)
++#else
+ static char chardef[256];
+ static char *binfmt = NULL;
+ static char *utfbinfmt = NULL;
+ public int binattr = AT_STANDOUT|AT_COLOR_BIN;
++#endif
+ 
++#ifdef __VSF__
++struct __less_charset_ctx {
++	char __chardef[256];
++	char *__binfmt;
++	char *__utfbinfmt;
++	struct charset __charsets[dimof(__charsets)];
++
++	struct {
++		char __buf[MAX_PRCHAR_LEN+1];
++	} prchar;
++	struct {
++		char __buf[MAX_PRCHAR_LEN+1];
++	} prutfchar;
++};
++static void __less_charset_mod_init(void *ctx)
++{
++	struct __less_charset_ctx *__less_charset_ctx = ctx;
++	memcpy(__less_charset_ctx->__charsets, __charsets, sizeof(__charsets));
++	__less_charset_ctx->__charsets[1].p_flag = &less_public_ctx->__utf_mode;
++}
++define_vsf_less_mod(less_charset,
++	sizeof(struct __less_charset_ctx),
++	VSF_LESS_MOD_CHARSET,
++	__less_charset_mod_init
++)
++#	define less_charset_ctx		((struct __less_charset_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_charset)))
++#endif
+ 
+ /*
+  * Define a charset, given a description string.
+@@ -445,7 +495,11 @@ prchar(c)
+ 	LWCHAR c;
+ {
+ 	/* {{ This buffer can be overrun if LESSBINFMT is a long string. }} */
++#ifdef __VSF__
++#	define buf					(less_charset_ctx->prchar.__buf)
++#else
+ 	static char buf[MAX_PRCHAR_LEN+1];
++#endif
+ 
+ 	c &= 0377;
+ 	if ((c < 128 || !utf_mode) && !control_char(c))
+@@ -471,6 +525,9 @@ prchar(c)
+ 	else
+ 		SNPRINTF1(buf, sizeof(buf), binfmt, c);
+ 	return (buf);
++#ifdef __VSF__
++#	undef buf
++#endif
+ }
+ 
+ /*
+@@ -480,7 +537,11 @@ prchar(c)
+ prutfchar(ch)
+ 	LWCHAR ch;
+ {
++#ifdef __VSF__
++#	define buf					(less_charset_ctx->prutfchar.__buf)
++#else
+ 	static char buf[MAX_PRCHAR_LEN+1];
++#endif
+ 
+ 	if (ch == ESC)
+ 		strcpy(buf, "ESC");
+@@ -502,6 +563,9 @@ prutfchar(ch)
+ 		*p = '\0';
+ 	}
+ 	return (buf);
++#ifdef __VSF__
++#	undef buf
++#endif
+ }
+ 
+ /*
+@@ -732,9 +796,9 @@ step_char(pp, dir, limit)
+  */
+ 
+ #define DECLARE_RANGE_TABLE_START(name) \
+-	static struct wchar_range name##_array[] = {
++	static const struct wchar_range name##_array[] = {
+ #define DECLARE_RANGE_TABLE_END(name) \
+-	}; struct wchar_range_table name##_table = { name##_array, sizeof(name##_array)/sizeof(*name##_array) };
++	}; const struct wchar_range_table name##_table = { (struct wchar_range *)name##_array, sizeof(name##_array)/sizeof(*name##_array) };
+ 
+ DECLARE_RANGE_TABLE_START(compose)
+ #include "compose.uni"
+@@ -753,7 +817,7 @@ DECLARE_RANGE_TABLE_START(fmt)
+ DECLARE_RANGE_TABLE_END(fmt)
+ 
+ /* comb_table is special pairs, not ranges. */
+-static struct wchar_range comb_table[] = {
++static const struct wchar_range comb_table[] = {
+ 	{0x0644,0x0622}, {0x0644,0x0623}, {0x0644,0x0625}, {0x0644,0x0627},
+ };
+ 
+@@ -792,8 +856,8 @@ is_in_table(ch, table)
+ is_composing_char(ch)
+ 	LWCHAR ch;
+ {
+-	return is_in_table(ch, &compose_table) ||
+-	       (bs_mode != BS_CONTROL && is_in_table(ch, &fmt_table));
++	return is_in_table(ch, (struct wchar_range_table *)&compose_table) ||
++	       (bs_mode != BS_CONTROL && is_in_table(ch, (struct wchar_range_table *)&fmt_table));
+ }
+ 
+ /*
+@@ -803,8 +867,8 @@ is_composing_char(ch)
+ is_ubin_char(ch)
+ 	LWCHAR ch;
+ {
+-	int ubin = is_in_table(ch, &ubin_table) ||
+-	           (bs_mode == BS_CONTROL && is_in_table(ch, &fmt_table));
++	int ubin = is_in_table(ch, (struct wchar_range_table *)&ubin_table) ||
++	           (bs_mode == BS_CONTROL && is_in_table(ch, (struct wchar_range_table *)&fmt_table));
+ 	return ubin;
+ }
+ 
+@@ -815,7 +879,7 @@ is_ubin_char(ch)
+ is_wide_char(ch)
+ 	LWCHAR ch;
+ {
+-	return is_in_table(ch, &wide_table);
++	return is_in_table(ch, (struct wchar_range_table *)&wide_table);
+ }
+ 
+ /*
+diff --git a/cmdbuf.c b/cmdbuf.c
+index a1c4156..db8f753 100644
+--- a/cmdbuf.c
++++ b/cmdbuf.c
+@@ -20,6 +20,21 @@
+ #include <sys/stat.h>
+ #endif
+ 
++#ifdef __VSF__
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#	define no_hist_dups			(less_public_ctx->__no_hist_dups)
++#	define marks_modified		(less_public_ctx->__marks_modified)
++#	define secure				(less_public_ctx->__secure)
++#	define updown_match			(less_public_ctx->__updown_match)
++
++#	define cmdbuf				(less_cmdbuf_ctx->__cmdbuf)
++#	define cmd_col				(less_cmdbuf_ctx->__cmd_col)
++#	define prompt_col			(less_cmdbuf_ctx->__prompt_col)
++#	define cp					(less_cmdbuf_ctx->__cp)
++#	define cmd_offset			(less_cmdbuf_ctx->__cmd_offset)
++#	define literal				(less_cmdbuf_ctx->__literal)
++#else
+ extern int sc_width;
+ extern int utf_mode;
+ extern int no_hist_dups;
+@@ -33,12 +48,21 @@ static char *cp;                 /* Pointer into cmdbuf */
+ static int cmd_offset;           /* Index into cmdbuf of first displayed char */
+ static int literal;              /* Next input char should not be interpreted */
+ public int updown_match = -1;    /* Prefix length in up/down movement */
++#endif
+ 
+ #if TAB_COMPLETE_FILENAME
+ static int cmd_complete LESSPARAMS((int action));
+ /*
+  * These variables are statics used by cmd_complete.
+  */
++#ifdef __VSF__
++#	define in_completion		(less_cmdbuf_ctx->__in_completion)
++#	define tk_text				(less_cmdbuf_ctx->__tk_text)
++#	define tk_original			(less_cmdbuf_ctx->__tk_original)
++#	define tk_ipoint			(less_cmdbuf_ctx->__tk_ipoint)
++#	define tk_trial				(less_cmdbuf_ctx->__tk_trial)
++#	define tk_tlist				(less_cmdbuf_ctx->__tk_tlist)
++#else
+ static int in_completion = 0;
+ static char *tk_text;
+ static char *tk_original;
+@@ -46,14 +70,20 @@ static char *tk_ipoint;
+ static char *tk_trial = NULL;
+ static struct textlist tk_tlist;
+ #endif
++#endif
+ 
+ static int cmd_left();
+ static int cmd_right();
+ 
++#ifdef __VSF__
++#	define openquote			(less_public_ctx->__openquote)
++#	define closequote			(less_public_ctx->__closequote)
++#else
+ #if SPACES_IN_FILENAMES
+ public char openquote = '"';
+ public char closequote = '"';
+ #endif
++#endif
+ 
+ #if CMD_HISTORY
+ 
+@@ -75,6 +105,16 @@ struct mlist
+ 	int modified;
+ };
+ 
++#ifdef __VSF__
++#	define ml_search			(less_public_ctx->__ml_search)
++#	define mlist_search			(less_cmdbuf_ctx->__mlist_search)
++#	define ml_examine			(less_public_ctx->__ml_examine)
++#	define mlist_examine		(less_cmdbuf_ctx->__mlist_examine)
++#if SHELL_ESCAPE || PIPEC
++#	define ml_shell				(less_public_ctx->__ml_shell)
++#	define mlist_shell			(less_cmdbuf_ctx->__mlist_shell)
++#endif
++#else
+ /*
+  * These are the various command histories that exist.
+  */
+@@ -91,27 +131,130 @@ struct mlist mlist_shell =
+ 	{ &mlist_shell,   &mlist_shell,   &mlist_shell,   NULL, 0 };
+ public void *ml_shell = (void *) &mlist_shell;
+ #endif
++#endif
+ 
+ #else /* CMD_HISTORY */
+ 
++#ifdef __VSF__
++#	define ml_search			(less_public_ctx->__ml_search)
++#	define ml_examine			(less_public_ctx->__ml_examine)
++#if SHELL_ESCAPE || PIPEC
++#	define ml_shell				(less_public_ctx->__ml_shell)
++#endif
++#else
+ /* If CMD_HISTORY is off, these are just flags. */
+ public void *ml_search = (void *)1;
+ public void *ml_examine = (void *)2;
+ #if SHELL_ESCAPE || PIPEC
+ public void *ml_shell = (void *)3;
+ #endif
++#endif
+ 
+ #endif /* CMD_HISTORY */
+ 
+ /*
+  * History for the current command.
+  */
++#ifdef __VSF__
++#	define curr_mlist			(less_cmdbuf_ctx->__curr_mlist)
++#	define curr_cmdflags		(less_cmdbuf_ctx->__curr_cmdflags)
++#	define cmd_mbc_buf			(less_cmdbuf_ctx->__cmd_mbc_buf)
++#	define cmd_mbc_buf_len		(less_cmdbuf_ctx->__cmd_mbc_buf_len)
++#	define cmd_mbc_buf_index	(less_cmdbuf_ctx->__cmd_mbc_buf_index)
++#else
+ static struct mlist *curr_mlist = NULL;
+ static int curr_cmdflags;
+ 
+ static char cmd_mbc_buf[MAX_UTF_CHAR_LEN];
+ static int cmd_mbc_buf_len;
+ static int cmd_mbc_buf_index;
++#endif
++
++#ifdef __VSF__
++struct __less_cmdbuf_ctx {
++	char __cmdbuf[CMDBUF_SIZE];
++	int __cmd_col;
++	int __prompt_col;
++	char *__cp;
++	int __cmd_offset;
++	int __literal;
++
++#if TAB_COMPLETE_FILENAME
++	int __in_completion;
++	char *__tk_text;
++	char *__tk_original;
++	char *__tk_ipoint;
++	char *__tk_trial;
++	struct textlist __tk_tlist;
++#endif
++
++	int __curr_cmdflags;
++	char __cmd_mbc_buf[MAX_UTF_CHAR_LEN];
++	int __cmd_mbc_buf_len;
++	int __cmd_mbc_buf_index;
++
++#if CMD_HISTORY
++	struct mlist __mlist_search;		// = { &mlist_search,  &mlist_search,  &mlist_search,  NULL, 0 };
++	struct mlist __mlist_examine;		// = { &mlist_examine, &mlist_examine, &mlist_examine, NULL, 0 };
++#endif
++
++#if SHELL_ESCAPE || PIPEC
++	struct mlist __curr_mlist;			// = { &mlist_shell,   &mlist_shell,   &mlist_shell,   NULL, 0 };
++#endif
++	struct mlist *__curr_mlist;
++};
++static void __less_cmdbuf_mod_init(void *ctx)
++{
++	struct __less_cmdbuf_ctx *__less_cmdbuf_ctx = ctx;
++#if CMD_HISTORY
++	__less_cmdbuf_ctx->__mlist_search = (struct mlist) {
++		&__less_cmdbuf_ctx->__mlist_search,
++		&__less_cmdbuf_ctx->__mlist_search,
++		&__less_cmdbuf_ctx->__mlist_search,
++		NULL, 0
++	};
++	__less_cmdbuf_ctx->__mlist_examine = (struct mlist) {
++		&__less_cmdbuf_ctx->__mlist_examine,
++		&__less_cmdbuf_ctx->__mlist_examine,
++		&__less_cmdbuf_ctx->__mlist_examine,
++		NULL, 0
++	};
++#if SHELL_ESCAPE || PIPEC
++	__less_cmdbuf_ctx->__ml_shell = (struct mlist) {
++		&__less_cmdbuf_ctx->__ml_shell,
++		&__less_cmdbuf_ctx->__ml_shell,
++		&__less_cmdbuf_ctx->__ml_shell,
++		NULL, 0
++	};
++#endif
++#endif
++}
++define_vsf_less_mod(less_cmdbuf,
++	sizeof(struct __less_cmdbuf_ctx),
++	VSF_LESS_MOD_CMDBUG,
++	__less_cmdbuf_mod_init
++)
++#	define less_cmdbuf_ctx		((struct __less_cmdbuf_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_cmdbuf)))
++void __less_cmdbuf_mod_init_public(struct __less_public_ctx *ctx)
++{
++	ctx->__updown_match = -1;
++	ctx->__openquote = '"';
++    ctx->__closequote = '"';
++#if CMD_HISTORY
++	ctx->__ml_search = (void *)&mlist_search;
++	ctx->__ml_examine = (void *)&mlist_examine;
++#if SHELL_ESCAPE || PIPEC
++	ctx->__ml_shell = (void *)&mlist_shell;
++#endif
++#else
++	ctx->__ml_search = (void *)1;
++	ctx->__ml_examine = (void *)2;
++#if SHELL_ESCAPE || PIPEC
++	ctx->__ml_shell = (void *)3;
++#endif
++#endif
++}
++#endif
+ 
+ 
+ /*
+diff --git a/command.c b/command.c
+index 2e6ad91..382c6d0 100644
+--- a/command.c
++++ b/command.c
+@@ -20,6 +20,75 @@
+ #include "option.h"
+ #include "cmd.h"
+ 
++#ifdef __VSF__
++#	define erase_char			(less_public_ctx->__erase_char)
++#	define erase2_char			(less_public_ctx->__erase2_char)
++#	define kill_char			(less_public_ctx->__kill_char)
++#	define sigs					(less_public_ctx->__sigs)
++#	define quit_if_one_screen	(less_public_ctx->__quit_if_one_screen)
++#	define squished				(less_public_ctx->__squished)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define kent					(less_public_ctx->__kent)
++#	define swindow				(less_public_ctx->__swindow)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define quitting				(less_public_ctx->__quitting)
++#	define wscroll				(less_public_ctx->__wscroll)
++#	define top_scroll			(less_public_ctx->__top_scroll)
++#	define ignore_eoi			(less_public_ctx->__ignore_eoi)
++#	define secure				(less_public_ctx->__secure)
++#	define hshift				(less_public_ctx->__hshift)
++#	define bs_mode				(less_public_ctx->__bs_mode)
++#	define show_attn			(less_public_ctx->__show_attn)
++#	define status_col			(less_public_ctx->__status_col)
++#	define highest_hilite		(less_public_ctx->__highest_hilite)
++#	define start_attnpos		(less_public_ctx->__start_attnpos)
++#	define end_attnpos			(less_public_ctx->__end_attnpos)
++#	define every_first_cmd		(less_public_ctx->__every_first_cmd)
++#	define initial_scrpos		(less_public_ctx->__initial_scrpos)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#	define ml_search			(less_public_ctx->__ml_search)
++#	define ml_examine			(less_public_ctx->__ml_examine)
++#	define wheel_lines			(less_public_ctx->__wheel_lines)
++#	define header_lines			(less_public_ctx->__header_lines)
++#	define def_search_type		(less_public_ctx->__def_search_type)
++#	define updown_match			(less_public_ctx->__updown_match)
++#if SHELL_ESCAPE || PIPEC
++#	define ml_shell				(less_public_ctx->__ml_shell)
++#endif
++#if EDITOR
++#	define editor				(less_public_ctx->__editor)
++#	define editproto			(less_public_ctx->__editproto)
++#endif
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define shift_count			(less_public_ctx->__shift_count)
++#	define oldbot				(less_public_ctx->__oldbot)
++#	define forw_prompt			(less_public_ctx->__forw_prompt)
++#	define incr_search			(less_public_ctx->__incr_search)
++#if MSDOS_COMPILER==WIN32C
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#endif
++
++extern const char version[];
++
++#if SHELL_ESCAPE
++#	define shellcmd				(less_command_ctx->__shellcmd)
++#endif
++#	define mca					(less_command_ctx->__mca)
++#	define search_type			(less_command_ctx->__search_type)
++#	define number				(less_command_ctx->__number)
++#	define fraction				(less_command_ctx->__fraction)
++#	define curropt				(less_command_ctx->__curropt)
++#	define opt_lower			(less_command_ctx->__opt_lower)
++#	define optflag				(less_command_ctx->__optflag)
++#	define optgetname			(less_command_ctx->__optgetname)
++#	define bottompos			(less_command_ctx->__bottompos)
++#	define save_hshift			(less_command_ctx->__save_hshift)
++#	define save_bs_mode			(less_command_ctx->__save_bs_mode)
++#if PIPEC
++#	define pipec				(less_command_ctx->__pipec)
++#endif
++#else
+ extern int erase_char, erase2_char, kill_char;
+ extern int sigs;
+ extern int quit_if_one_screen;
+@@ -84,13 +153,47 @@ static int save_bs_mode;
+ #if PIPEC
+ static char pipec;
+ #endif
++#endif
+ 
+ /* Stack of ungotten chars (via ungetcc) */
+ struct ungot {
+ 	struct ungot *ug_next;
+ 	LWCHAR ug_char;
+ };
+-static struct ungot* ungot = NULL;
++#ifdef __VSF__
++#	define __ungot				(less_command_ctx->____ungot)
++#else
++static struct ungot* __ungot = NULL;
++#endif
++
++#ifdef __VSF__
++struct __less_command_ctx {
++#if SHELL_ESCAPE
++	char *__shellcmd;
++#endif
++	int __mca;
++	int __search_type;
++	LINENUM __number;
++	long __fraction;
++	struct loption *__curropt;
++	int __opt_lower;
++	int __optflag;
++	int __optgetname;
++	POSITION __bottompos;
++	int __save_hshift;
++	int __save_bs_mode;
++#if PIPEC
++	char __pipec;
++#endif
++	struct ungot* ____ungot;
++};
++define_vsf_less_mod(less_command,
++	sizeof(struct __less_command_ctx),
++	VSF_LESS_MOD_COMMAND,
++	NULL
++)
++#	define less_command_ctx		((struct __less_command_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_command)))
++#endif
+ 
+ static void multi_search LESSPARAMS((char *pattern, int n, int silent));
+ 
+@@ -790,7 +893,7 @@ prompt(VOID_PARAM)
+ {
+ 	constant char *p;
+ 
+-	if (ungot != NULL && ungot->ug_char != CHAR_END_COMMAND)
++	if (__ungot != NULL && __ungot->ug_char != CHAR_END_COMMAND)
+ 	{
+ 		/*
+ 		 * No prompt necessary if commands are from 
+@@ -886,7 +989,7 @@ dispversion(VOID_PARAM)
+ {
+ 	PARG parg;
+ 
+-	parg.p_string = version;
++	parg.p_string = (char *)version;
+ 	error("less %s", &parg);
+ }
+ 
+@@ -907,7 +1010,7 @@ getcc_end_command(VOID_PARAM)
+ 		return ('\n'); 
+ 	default:
+ 		/* Some other incomplete command.  Let user complete it. */
+-		return ((ungot == NULL) ? getchr() : 0);
++		return ((__ungot == NULL) ? getchr() : 0);
+ 	}
+ }
+ 
+@@ -923,7 +1026,7 @@ getccu(VOID_PARAM)
+ 	LWCHAR c = 0;
+ 	while (c == 0)
+ 	{
+-		if (ungot == NULL)
++		if (__ungot == NULL)
+ 		{
+ 			/* Normal case: no ungotten chars.
+ 			 * Get char from the user. */
+@@ -932,9 +1035,9 @@ getccu(VOID_PARAM)
+ 		{
+ 			/* Ungotten chars available:
+ 			 * Take the top of stack (most recent). */
+-			struct ungot *ug = ungot;
++			struct ungot *ug = __ungot;
+ 			c = ug->ug_char;
+-			ungot = ug->ug_next;
++			__ungot = ug->ug_next;
+ 			free(ug);
+ 
+ 			if (c == CHAR_END_COMMAND)
+@@ -1010,8 +1113,8 @@ ungetcc(c)
+ 	struct ungot *ug = (struct ungot *) ecalloc(1, sizeof(struct ungot));
+ 
+ 	ug->ug_char = c;
+-	ug->ug_next = ungot;
+-	ungot = ug;
++	ug->ug_next = __ungot;
++	__ungot = ug;
+ }
+ 
+ /*
+@@ -1025,12 +1128,12 @@ ungetcc_back(c)
+ 	struct ungot *ug = (struct ungot *) ecalloc(1, sizeof(struct ungot));
+ 	ug->ug_char = c;
+ 	ug->ug_next = NULL;
+-	if (ungot == NULL)
+-		ungot = ug;
++	if (__ungot == NULL)
++		__ungot = ug;
+ 	else
+ 	{
+ 		struct ungot *pu;
+-		for (pu = ungot; pu->ug_next != NULL; pu = pu->ug_next)
++		for (pu = __ungot; pu->ug_next != NULL; pu = pu->ug_next)
+ 			continue;
+ 		pu->ug_next = ug;
+ 	}
+diff --git a/cvt.c b/cvt.c
+index bb46492..48f6ac2 100644
+--- a/cvt.c
++++ b/cvt.c
+@@ -14,7 +14,11 @@
+ #include "less.h"
+ #include "charset.h"
+ 
++#ifdef __VSF__
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#else
+ extern int utf_mode;
++#endif
+ 
+ /*
+  * Get the length of a buffer needed to convert a string.
+diff --git a/decode.c b/decode.c
+index 0444cab..42d389d 100644
+--- a/decode.c
++++ b/decode.c
+@@ -33,11 +33,21 @@
+ #include "cmd.h"
+ #include "lesskey.h"
+ 
++#ifdef __VSF__
++#	define erase_char			(less_public_ctx->__erase_char)
++#	define erase2_char			(less_public_ctx->__erase2_char)
++#	define kill_char			(less_public_ctx->__kill_char)
++#	define secure				(less_public_ctx->__secure)
++#	define mousecap				(less_public_ctx->__mousecap)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define sc_height			(less_public_ctx->__sc_height)
++#else
+ extern int erase_char, erase2_char, kill_char;
+ extern int secure;
+ extern int mousecap;
+ extern int screen_trashed;
+ extern int sc_height;
++#endif
+ 
+ #define SK(k) \
+ 	SK_SPECIAL_KEY, (k), 6, 1, 1, 1
+@@ -45,8 +55,28 @@ extern int sc_height;
+  * Command table is ordered roughly according to expected
+  * frequency of use, so the common commands are near the beginning.
+  */
++#ifdef __VSF__
++struct __less_decode_ctx {
++	struct tablelist *__list_fcmd_tables;
++	struct tablelist *__list_ecmd_tables;
++	struct tablelist *__list_var_tables;
++	struct tablelist *__list_sysvar_tables;
++
++	unsigned char __cmdtable[501];
++	unsigned char __edittable[216];
+ 
++#if USERFILE && HAVE_LESSKEYSRC
++	struct {
++		struct lesskey_tables __tables;
++	} lesskey_src;
++#endif
++};
++static void __less_decode_init_table(struct __less_decode_ctx *ctx)
++{
++unsigned char __cmdtable[] =
++#else
+ static unsigned char cmdtable[] =
++#endif
+ {
+ 	'\r',0,                         A_F_LINE,
+ 	'\n',0,                         A_F_LINE,
+@@ -179,7 +209,14 @@ static unsigned char cmdtable[] =
+ 	'Z','Z',0,                      A_QUIT
+ };
+ 
++#ifdef __VSF__
++	VSF_LINUX_ASSERT(sizeof(ctx->__cmdtable) >= sizeof(__cmdtable));
++	memcpy(ctx->__cmdtable, __cmdtable, sizeof(__cmdtable));
++
++unsigned char __edittable[] =
++#else
+ static unsigned char edittable[] =
++#endif
+ {
+ 	'\t',0,                         EC_F_COMPLETE,  /* TAB */
+ 	'\17',0,                        EC_B_COMPLETE,  /* BACKTAB */
+@@ -219,6 +256,24 @@ static unsigned char edittable[] =
+ 	ESC,'[','M',0,                  EC_X11MOUSE,    /* X11 mouse report */
+ 	ESC,'[','<',0,                  EC_X116MOUSE,   /* X11 1006 mouse report */
+ };
++#ifdef __VSF__
++	VSF_LINUX_ASSERT(sizeof(ctx->__edittable) >= sizeof(__edittable));
++	memcpy(ctx->__edittable, __edittable, sizeof(__edittable));
++}
++static void __less_decode_mod_init(void *ctx)
++{
++	struct __less_decode_ctx *__less_decode_ctx = ctx;
++	__less_decode_init_table(__less_decode_ctx);
++}
++define_vsf_less_mod(less_decode,
++	sizeof(struct __less_decode_ctx),
++	VSF_LESS_MOD_DECODE,
++	__less_decode_mod_init
++)
++#	define less_decode_ctx		((struct __less_decode_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_decode)))
++#	define cmdtable				(less_decode_ctx->__cmdtable)
++#	define edittable			(less_decode_ctx->__edittable)
++#endif
+ 
+ /*
+  * Structure to support a list of command tables.
+@@ -233,11 +288,17 @@ struct tablelist
+ /*
+  * List of command tables and list of line-edit tables.
+  */
++#ifdef __VSF__
++#	define list_fcmd_tables		(less_decode_ctx->__list_fcmd_tables)
++#	define list_ecmd_tables		(less_decode_ctx->__list_ecmd_tables)
++#	define list_var_tables		(less_decode_ctx->__list_var_tables)
++#	define list_sysvar_tables	(less_decode_ctx->__list_sysvar_tables)
++#else
+ static struct tablelist *list_fcmd_tables = NULL;
+ static struct tablelist *list_ecmd_tables = NULL;
+ static struct tablelist *list_var_tables = NULL;
+ static struct tablelist *list_sysvar_tables = NULL;
+-
++#endif
+ 
+ /*
+  * Expand special key abbreviations in a command table.
+@@ -912,7 +973,11 @@ lesskey_src(filename, sysvar)
+ 	char *filename;
+ 	int sysvar;
+ {
++#ifdef __VSF__
++#	define tables				(less_decode_ctx->lesskey_src.__tables)
++#else
+ 	static struct lesskey_tables tables;
++#endif
+ 	int r = parse_lesskey(filename, &tables);
+ 	if (r != 0)
+ 		return (r);
+@@ -921,6 +986,9 @@ lesskey_src(filename, sysvar)
+ 	add_var_table(sysvar ? &list_sysvar_tables : &list_var_tables,
+ 		tables.vartable.buf.data, tables.vartable.buf.end);
+ 	return (0);
++#ifdef __VSF__
++#	undef tables
++#endif
+ }
+ 
+ 	void
+diff --git a/edit.c b/edit.c
+index 151ac74..b70bb54 100644
+--- a/edit.c
++++ b/edit.c
+@@ -17,6 +17,35 @@
+ #include <signal.h>
+ #endif
+ 
++#ifdef __VSF__
++#	define fd0					(less_public_ctx->__fd0)
++#	define new_file				(less_public_ctx->__new_file)
++#	define cbufs				(less_public_ctx->__cbufs)
++#	define every_first_cmd		(less_public_ctx->__every_first_cmd)
++#	define force_open			(less_public_ctx->__force_open)
++#	define is_tty				(less_public_ctx->__is_tty)
++#	define sigs					(less_public_ctx->__sigs)
++#	define hshift				(less_public_ctx->__hshift)
++#	define want_filesize		(less_public_ctx->__want_filesize)
++#	define consecutive_nulls	(less_public_ctx->__consecutive_nulls)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#	define old_ifile			(less_public_ctx->__old_ifile)
++#	define initial_scrpos		(less_public_ctx->__initial_scrpos)
++#	define ml_examine			(less_public_ctx->__ml_examine)
++#if SPACES_IN_FILENAMES
++#	define openquote			(less_public_ctx->__openquote)
++#	define closequote			(less_public_ctx->__closequote)
++#endif
++#if LOGFILE
++#	define logfile				(less_public_ctx->__logfile)
++#	define force_logfile		(less_public_ctx->__force_logfile)
++#	define namelogfile			(less_public_ctx->__namelogfile)
++#endif
++#if HAVE_STAT_INO
++#	define curr_dev				(less_public_ctx->__curr_dev)
++#	define curr_ino				(less_public_ctx->__curr_ino)
++#endif
++#else
+ public int fd0 = 0;
+ 
+ extern int new_file;
+@@ -47,6 +76,7 @@ extern char *namelogfile;
+ public dev_t curr_dev;
+ public ino_t curr_ino;
+ #endif
++#endif
+ 
+ /*
+  * Textlist functions deal with a list of words separated by spaces.
+diff --git a/filename.c b/filename.c
+index 5824e38..6b55262 100644
+--- a/filename.c
++++ b/filename.c
+@@ -43,6 +43,19 @@
+ #endif
+ #endif
+ 
++#ifdef __VSF__
++#	define force_open			(less_public_ctx->__force_open)
++#	define secure				(less_public_ctx->__secure)
++#	define use_lessopen			(less_public_ctx->__use_lessopen)
++#	define ctldisp				(less_public_ctx->__ctldisp)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#	define old_ifile			(less_public_ctx->__old_ifile)
++#if SPACES_IN_FILENAMES
++#	define openquote			(less_public_ctx->__openquote)
++#	define closequote			(less_public_ctx->__closequote)
++#endif
++#else
+ extern int force_open;
+ extern int secure;
+ extern int use_lessopen;
+@@ -54,6 +67,21 @@ extern IFILE old_ifile;
+ extern char openquote;
+ extern char closequote;
+ #endif
++#endif
++
++#ifdef __VSF__
++struct __less_filename_ctx {
++	struct {
++		char *__mchars;
++	} metachars;
++};
++define_vsf_less_mod(less_filename,
++	sizeof(struct __less_filename_ctx),
++	VSF_LESS_MOD_FILENAME,
++	NULL
++)
++#	define less_filename_ctx	((struct __less_filename_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_filename)))
++#endif
+ 
+ /*
+  * Remove quotes around a filename.
+@@ -114,7 +142,11 @@ get_meta_escape(VOID_PARAM)
+ 	static char *
+ metachars(VOID_PARAM)
+ {
++#ifdef __VSF__
++#	define mchars				(less_filename_ctx->metachars.__mchars)
++#else
+ 	static char *mchars = NULL;
++#endif
+ 
+ 	if (mchars == NULL)
+ 	{
+@@ -123,6 +155,9 @@ metachars(VOID_PARAM)
+ 			mchars = DEF_METACHARS;
+ 	}
+ 	return (mchars);
++#ifdef __VSF__
++#	undef mchars
++#endif
+ }
+ 
+ /*
+@@ -1041,7 +1076,7 @@ bad_file(filename)
+ 
+ 	if (!force_open && is_dir(filename))
+ 	{
+-		static char is_a_dir[] = " is a directory";
++		static const char is_a_dir[] = " is a directory";
+ 
+ 		m = (char *) ecalloc(strlen(filename) + sizeof(is_a_dir), 
+ 			sizeof(char));
+@@ -1062,7 +1097,7 @@ bad_file(filename)
+ 			m = NULL;
+ 		} else if (!S_ISREG(statbuf.st_mode))
+ 		{
+-			static char not_reg[] = " is not a regular file (use -f to see it)";
++			static const char not_reg[] = " is not a regular file (use -f to see it)";
+ 			m = (char *) ecalloc(strlen(filename) + sizeof(not_reg),
+ 				sizeof(char));
+ 			strcpy(m, filename);
+diff --git a/forwback.c b/forwback.c
+index 47f4dd2..338ae93 100644
+--- a/forwback.c
++++ b/forwback.c
+@@ -16,6 +16,37 @@
+ #include "less.h"
+ #include "position.h"
+ 
++#ifdef __VSF__
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define squished				(less_public_ctx->__squished)
++#	define no_back_scroll		(less_public_ctx->__no_back_scroll)
++#	define forw_prompt			(less_public_ctx->__forw_prompt)
++#	define first_time			(less_public_ctx->__first_time)
++
++#	define sigs					(less_public_ctx->__sigs)
++#	define top_scroll			(less_public_ctx->__top_scroll)
++#	define quiet				(less_public_ctx->__quiet)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define hshift				(less_public_ctx->__hshift)
++#	define auto_wrap			(less_public_ctx->__auto_wrap)
++#	define plusoption			(less_public_ctx->__plusoption)
++#	define forw_scroll			(less_public_ctx->__forw_scroll)
++#	define back_scroll			(less_public_ctx->__back_scroll)
++#	define ignore_eoi			(less_public_ctx->__ignore_eoi)
++#	define clear_bg				(less_public_ctx->__clear_bg)
++#	define final_attr			(less_public_ctx->__final_attr)
++#	define header_lines			(less_public_ctx->__header_lines)
++#	define header_cols			(less_public_ctx->__header_cols)
++#if HILITE_SEARCH
++#	define size_linebuf			(less_public_ctx->__size_linebuf)
++#	define hilite_search		(less_public_ctx->__hilite_search)
++#	define status_col			(less_public_ctx->__status_col)
++#endif
++#if TAGS
++#	define tagoption			(less_public_ctx->__tagoption)
++#endif
++#else
+ public int screen_trashed;
+ public int squished;
+ public int no_back_scroll = 0;
+@@ -44,6 +75,23 @@ extern int status_col;
+ #if TAGS
+ extern char *tagoption;
+ #endif
++#endif
++
++#if HAVE_TIME
++#ifdef __VSF__
++struct __less_forwback_ctx {
++	struct {
++		time_type __last_eof_bell;
++	} eof_bell;
++};
++define_vsf_less_mod(less_forwback,
++	sizeof(struct __less_forwback_ctx),
++	VSF_LESS_MOD_FORWBACK,
++	NULL
++)
++#	define less_forwback_ctx	((struct __less_forwback_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_forwback)))
++#endif
++#endif
+ 
+ /*
+  * Sound the bell to indicate user is trying to move past end of file.
+@@ -52,11 +100,18 @@ extern char *tagoption;
+ eof_bell(VOID_PARAM)
+ {
+ #if HAVE_TIME
++#ifdef __VSF__
++#	define last_eof_bell		(less_forwback_ctx->eof_bell.__last_eof_bell)
++#else
+ 	static time_type last_eof_bell = 0;
++#endif
+ 	time_type now = get_time();
+ 	if (now == last_eof_bell) /* max once per second */
+ 		return;
+ 	last_eof_bell = now;
++#ifdef __VSF__
++#	undef last_eof_bell
++#endif
+ #endif
+ 	if (quiet == NOT_QUIET)
+ 		bell();
+diff --git a/ifile.c b/ifile.c
+index 6b3d1ce..47e378e 100644
+--- a/ifile.c
++++ b/ifile.c
+@@ -21,7 +21,11 @@
+ 
+ #include "less.h"
+ 
++#ifdef __VSF__
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#else
+ extern IFILE    curr_ifile;
++#endif
+ 
+ struct ifile {
+ 	struct ifile *h_next;           /* Links for command line list */
+@@ -47,9 +51,35 @@ struct ifile {
+ /*
+  * Anchor for linked list.
+  */
++#ifdef __VSF__
++#	define anchor				(less_ifile_ctx->__anchor)
++#	define ifiles				(less_ifile_ctx->__ifiles)
++#else
+ static struct ifile anchor = { &anchor, &anchor, NULL, NULL, NULL, 0, 0, '\0',
+ 				{ NULL_POSITION, 0 } };
+ static int ifiles = 0;
++#endif
++
++#ifdef __VSF__
++struct __less_ifile_ctx {
++	struct ifile __anchor;		// = { &anchor, &anchor, NULL, NULL, NULL, 0, 0, '\0', { NULL_POSITION, 0 } };
++	int __ifiles;
++};
++static void __less_ifile_mod_init(void *ctx)
++{
++	struct __less_ifile_ctx *__less_ifile_ctx = ctx;
++	__less_ifile_ctx->__anchor = (struct ifile) {
++		&__less_ifile_ctx->__anchor, &__less_ifile_ctx->__anchor,
++		NULL, NULL, NULL, 0, 0, '\0', { NULL_POSITION, 0 }
++	};
++}
++define_vsf_less_mod(less_ifile,
++	sizeof(struct __less_ifile_ctx),
++	VSF_LESS_MOD_IFILE,
++	__less_ifile_mod_init
++)
++#	define less_ifile_ctx		((struct __less_ifile_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_ifile)))
++#endif
+ 
+ 	static void
+ incr_index(p, incr)
+diff --git a/input.c b/input.c
+index ffd2f13..9d46d18 100644
+--- a/input.c
++++ b/input.c
+@@ -19,6 +19,21 @@
+ 
+ #include "less.h"
+ 
++#ifdef __VSF__
++#	define squeeze				(less_public_ctx->__squeeze)
++#	define hshift				(less_public_ctx->__hshift)
++#	define quit_if_one_screen	(less_public_ctx->__quit_if_one_screen)
++#	define sigs					(less_public_ctx->__sigs)
++#	define ignore_eoi			(less_public_ctx->__ignore_eoi)
++#	define status_col			(less_public_ctx->__status_col)
++#	define start_attnpos		(less_public_ctx->__start_attnpos)
++#	define end_attnpos			(less_public_ctx->__end_attnpos)
++#if HILITE_SEARCH
++#	define hilite_search		(less_public_ctx->__hilite_search)
++#	define size_linebuf			(less_public_ctx->__size_linebuf)
++#	define show_attn			(less_public_ctx->__show_attn)
++#endif
++#else
+ extern int squeeze;
+ extern int hshift;
+ extern int quit_if_one_screen;
+@@ -32,6 +47,7 @@ extern int hilite_search;
+ extern int size_linebuf;
+ extern int show_attn;
+ #endif
++#endif
+ 
+ /*
+  * Get the next line.
+diff --git a/jump.c b/jump.c
+index ee1b0c6..9b7f236 100644
+--- a/jump.c
++++ b/jump.c
+@@ -15,12 +15,22 @@
+ #include "less.h"
+ #include "position.h"
+ 
++#ifdef __VSF__
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define squished				(less_public_ctx->__squished)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define show_attn			(less_public_ctx->__show_attn)
++#	define top_scroll			(less_public_ctx->__top_scroll)
++#else
+ extern int jump_sline;
+ extern int squished;
+ extern int screen_trashed;
+ extern int sc_width, sc_height;
+ extern int show_attn;
+ extern int top_scroll;
++#endif
+ 
+ /*
+  * Jump to the end of the file.
+diff --git a/less.h b/less.h
+index 43e2cc4..e87d3a7 100644
+--- a/less.h
++++ b/less.h
+@@ -585,3 +585,188 @@ POSITION lstrtopos LESSPARAMS ((char*, char**));
+ #if MSDOS_COMPILER==WIN32C
+ int pclose LESSPARAMS ((FILE*));
+ #endif
++
++#ifdef __VSF__
++#	include "less_port_vsf.h"
++struct __less_public_ctx {
++	// ch.c
++	public int __ignore_eoi;
++	// charset.c
++	public int __utf_mode;
++	public int __binattr;					// = AT_STANDOUT|AT_COLOR_BIN;
++	// cmdbuf.c
++	public int __updown_match;				// = -1;
++	public char __openquote;				// = '"';
++	public char __closequote;				// = '"';
++	public void *__ml_search;				// = (void *) &mlist_search;
++	public void *__ml_examine;				// = (void *) &mlist_examine;
++#if SHELL_ESCAPE || PIPEC
++	public void *__ml_shell;				// = (void *) &mlist_shell;
++#endif
++
++	// edit
++	public int __fd0;
++#if HAVE_STAT_INO
++	public dev_t __curr_dev;
++	public ino_t __curr_ino;
++#endif
++
++	// forwback
++	public int __screen_trashed;
++	public int __squished;
++	public int __no_back_scroll;
++	public int __forw_prompt;
++	public int __first_time;				// = 1;
++
++	// line
++	public int __size_linebuf;
++	public int __hshift;
++	public int __tabstops[TABSTOP_MAX];
++	public int __ntabstops;					// = 1;
++	public int __tabdefault;				// = 8;
++	public POSITION __highest_hilite;
++
++	// main.c
++	public char *__every_first_cmd;
++	public int __new_file;
++	public int __is_tty;
++	public IFILE __curr_ifile;
++	public IFILE __old_ifile;
++	public struct scrpos __initial_scrpos;
++	public POSITION __start_attnpos;		// = NULL_POSITION;
++	public POSITION __end_attnpos;			// = NULL_POSITION;
++	public int __wscroll;
++	public char *__progname;
++	public int __quitting;
++	public int __secure;
++	public int __dohelp;
++#if LOGFILE
++	public int __logfile;					// = -1;
++	public int __force_logfile;
++	public char *__namelogfile;
++#endif
++#if EDITOR
++	public char *__editor;
++	public char *__editproto;
++#endif
++	public int __one_screen;
++
++	// mark
++	public int __marks_modified;
++
++	// optfunc
++	public char *__tagoption;
++
++	// opttbl
++	public int __quiet;
++	public int __how_search;
++	public int __top_scroll;
++	public int __pr_type;
++	public int __bs_mode;
++	public int __know_dumb;
++	public int __quit_at_eof;
++	public int __quit_if_one_screen;
++	public int __squeeze;
++	public int __tabstop;
++	public int __back_scroll;
++	public int __forw_scroll;
++	public int __caseless;
++	public int __linenums;
++	public int __autobuf;
++	public int __bufspace;
++	public int __ctldisp;
++	public int __force_open;
++	public int __swindow;
++	public int __jump_sline;
++	public long __jump_sline_fraction;		// = -1;
++	public long __shift_count_fraction;		// = -1;
++	public int __chopline;
++	public int __no_init;
++	public int __no_keypad;
++	public int __twiddle;
++	public int __show_attn;
++	public int __shift_count;
++	public int __status_col;
++	public int __use_lessopen;
++	public int __quit_on_intr;
++	public int __follow_mode;
++	public int __oldbot;
++	public int __opt_use_backslash;
++	public char __rscroll_char;
++	public int __rscroll_attr;
++	public int __no_hist_dups;
++	public int __mousecap;
++	public int __wheel_lines;
++	public int __perma_marks;
++	public int __linenum_width;
++	public int __status_col_width;
++	public int __incr_search;
++	public int __use_color;
++	public int __want_filesize;
++	public int __status_line;
++	public int __header_lines;
++	public int __header_cols;
++	public int __nonum_headers;
++	public int __redraw_on_quit;
++	public int __def_search_type;
++#if HILITE_SEARCH
++	public int __hilite_search;
++#endif
++	public int __less_is_more;
++
++	// os
++	public int __reading;
++	public int __consecutive_nulls;
++
++	// output
++	public int __errmsgs;
++	public int __need_clr;
++	public int __final_attr;
++	public int __at_prompt;
++
++	// prompt
++	public char *__prproto[3];
++	public char constant *__eqproto;		// = e_proto;
++	public char constant *__hproto;			// = h_proto;
++	public char constant *__wproto;			// = w_proto;
++
++	// screen
++	public int __auto_wrap;
++	public int __ignaw;
++	public int __erase_char;
++	public int __erase2_char;
++	public int __kill_char;
++	public int __werase_char;
++	public int __sc_width, __sc_height;
++	public int __bo_s_width, __bo_e_width;
++	public int __ul_s_width, __ul_e_width;
++	public int __so_s_width, __so_e_width;
++	public int __bl_s_width, __bl_e_width;
++	public int __above_mem, __below_mem;
++	public int __can_goto_line;
++	public int __clear_bg;
++	public int __missing_cap;
++	public char *__kent;
++	public int __term_init_done;
++
++	// search
++	public int __is_caseless;
++
++	// signal
++	public int __sigs;
++
++	// tags
++#if TAGS
++	public char *__tags;					//  = ztags;
++#endif
++
++	// ttyin
++	public int __tty;
++
++	// option
++	public int __plusoption;
++};
++//define_vsf_less_mod(less_public, sizeof(struct __less_public_ctx), VSF_LESS_MOD_PUBLIC, NULL)
++declare_vsf_less_mod(less_public)
++#	define less_public_ctx		((struct __less_public_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_public)))
++#endif
+diff --git a/line.c b/line.c
+index 0ef9b07..95c05c7 100644
+--- a/line.c
++++ b/line.c
+@@ -23,7 +23,7 @@
+ #endif
+ 
+ #define MAX_PFX_WIDTH (MAX_LINENUM_WIDTH + MAX_STATUSCOL_WIDTH + 1)
+-static struct {
++static struct linebuf_t {
+ 	char *buf;    /* Buffer which holds the current output line */
+ 	int *attr;   /* Parallel to buf, to hold attributes */
+ 	int print;    /* Index in buf of first printable char */
+@@ -31,13 +31,22 @@ static struct {
+ 	char pfx[MAX_PFX_WIDTH]; /* Holds status column and line number */
+ 	int pfx_attr[MAX_PFX_WIDTH];
+ 	int pfx_end;  /* Number of chars in pfx */
+-} linebuf;
++}
++#ifdef __VSF__
++;
++#else
++linebuf;
++#endif
+ 
+ /*
+  * Buffer of ansi sequences which have been shifted off the left edge 
+  * of the screen. 
+  */
++#ifdef __VSF__
++#	define shifted_ansi			(less_line_ctx->__shifted_ansi)
++#else
+ struct xbuffer shifted_ansi;
++#endif
+ 
+ /*
+  * Ring buffer of last ansi sequences sent.
+@@ -46,6 +55,40 @@ struct xbuffer shifted_ansi;
+  * {{ Not ideal, since we don't really know how many to resend. }}
+  */
+ #define NUM_LAST_ANSIS 3
++#ifdef __VSF__
++#	define linebuf				(less_line_ctx->__linebuf)
++#	define shifted_ansi			(less_line_ctx->__shifted_ansi)
++#	define last_ansi			(less_line_ctx->__last_ansi)
++#	define last_ansis			(less_line_ctx->__last_ansis)
++#	define curr_last_ansi		(less_line_ctx->__curr_last_ansi)
++#	define line_ansi			(less_line_ctx->__line_ansi)
++#	define ansi_in_line			(less_line_ctx->__ansi_in_line)
++#	define hlink_in_line		(less_line_ctx->__hlink_in_line)
++#	define line_mark_attr		(less_line_ctx->__line_mark_attr)
++#	define cshift				(less_line_ctx->__cshift)
++#	define end_column			(less_line_ctx->__end_column)
++#	define right_curr			(less_line_ctx->__right_curr)
++#	define right_column			(less_line_ctx->__right_column)
++#	define overstrike			(less_line_ctx->__overstrike)
++#	define last_overstrike		(less_line_ctx->__last_overstrike)
++#	define is_null_line			(less_line_ctx->__is_null_line)
++#	define pendc				(less_line_ctx->__pendc)
++#	define pendpos				(less_line_ctx->__pendpos)
++#	define end_ansi_chars		(less_line_ctx->__end_ansi_chars)
++#	define mid_ansi_chars		(less_line_ctx->__mid_ansi_chars)
++#	define in_hilite			(less_line_ctx->__in_hilite)
++#	define mbc_buf				(less_line_ctx->__mbc_buf)
++#	define mbc_buf_len			(less_line_ctx->__mbc_buf_len)
++#	define mbc_buf_index		(less_line_ctx->__mbc_buf_index)
++#	define mbc_pos				(less_line_ctx->__mbc_pos)
++
++#	define size_linebuf			(less_public_ctx->__size_linebuf)
++#	define hshift				(less_public_ctx->__hshift)
++#	define tabstops				(less_public_ctx->__tabstops)
++#	define ntabstops			(less_public_ctx->__ntabstops)
++#	define tabdefault			(less_public_ctx->__tabdefault)
++#	define highest_hilite		(less_public_ctx->__highest_hilite)
++#else
+ static struct xbuffer last_ansi;
+ static struct xbuffer last_ansis[NUM_LAST_ANSIS];
+ static int curr_last_ansi;
+@@ -73,11 +116,48 @@ static POSITION pendpos;
+ static char *end_ansi_chars;
+ static char *mid_ansi_chars;
+ static int in_hilite;
++#endif
+ 
+ static int attr_swidth LESSPARAMS ((int a));
+ static int attr_ewidth LESSPARAMS ((int a));
+ static int do_append LESSPARAMS ((LWCHAR ch, char *rep, POSITION pos));
+ 
++#ifdef __VSF__
++#	define sigs					(less_public_ctx->__sigs)
++#	define bs_mode				(less_public_ctx->__bs_mode)
++#	define linenums				(less_public_ctx->__linenums)
++#	define ctldisp				(less_public_ctx->__ctldisp)
++#	define twiddle				(less_public_ctx->__twiddle)
++#	define binattr				(less_public_ctx->__binattr)
++#	define status_col			(less_public_ctx->__status_col)
++#	define status_col_width		(less_public_ctx->__status_col_width)
++#	define linenum_width		(less_public_ctx->__linenum_width)
++#	define auto_wrap			(less_public_ctx->__auto_wrap)
++#	define ignaw				(less_public_ctx->__ignaw)
++#	define bo_s_width			(less_public_ctx->__bo_s_width)
++#	define bo_e_width			(less_public_ctx->__bo_e_width)
++#	define ul_s_width			(less_public_ctx->__ul_s_width)
++#	define ul_e_width			(less_public_ctx->__ul_e_width)
++#	define bl_s_width			(less_public_ctx->__bl_s_width)
++#	define bl_e_width			(less_public_ctx->__bl_e_width)
++#	define so_s_width			(less_public_ctx->__so_s_width)
++#	define so_e_width			(less_public_ctx->__so_e_width)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#	define start_attnpos		(less_public_ctx->__start_attnpos)
++#	define end_attnpos			(less_public_ctx->__end_attnpos)
++#	define rscroll_char			(less_public_ctx->__rscroll_char)
++#	define rscroll_attr			(less_public_ctx->__rscroll_attr)
++#	define use_color			(less_public_ctx->__use_color)
++#	define status_line			(less_public_ctx->__status_line)
++
++#	define mbc_buf				(less_line_ctx->__mbc_buf)
++#	define mbc_buf_len			(less_line_ctx->__mbc_buf_len)
++#	define mbc_buf_index		(less_line_ctx->__mbc_buf_index)
++#	define mbc_pos				(less_line_ctx->__mbc_pos)
++#	define color_map			(less_line_ctx->__color_map)
++#else
+ extern int sigs;
+ extern int bs_mode;
+ extern int linenums;
+@@ -123,6 +203,74 @@ static char color_map[AT_NUM_COLORS][12] = {
+ 	"",    /* AT_BLINK */
+ 	"",    /* AT_STANDOUT */
+ };
++#endif
++
++#ifdef __VSF__
++struct __less_line_ctx {
++	char __mbc_buf[MAX_UTF_CHAR_LEN];
++	int __mbc_buf_len;
++	int __mbc_buf_index;
++	POSITION __mbc_pos;
++	char __color_map[AT_NUM_COLORS][12];
++
++	struct linebuf_t __linebuf;
++	struct xbuffer __shifted_ansi;
++
++	struct xbuffer __last_ansi;
++	struct xbuffer __last_ansis[NUM_LAST_ANSIS];
++	int __curr_last_ansi;
++
++	struct ansi_state *__line_ansi;
++	int __ansi_in_line;
++	int __hlink_in_line;
++	int __line_mark_attr;
++	int __cshift;
++
++	int __end_column;
++	int __right_curr;
++	int __right_column;
++	int __overstrike;
++	int __last_overstrike;
++	int __is_null_line;
++	LWCHAR __pendc;
++	POSITION __pendpos;
++	char *__end_ansi_chars;
++	char *__mid_ansi_chars;
++	int __in_hilite;
++
++	struct {
++		char __hlink_prefix[5]; // = ESCS "]8;";
++	} ansi_step;
++};
++static void __less_line_mod_init(void *ctx)
++{
++	struct __less_line_ctx *__less_line_ctx = ctx;
++char __color_map[AT_NUM_COLORS][12] = {
++	"Wm",  /* AT_COLOR_ATTN */
++	"kR",  /* AT_COLOR_BIN */
++	"kR",  /* AT_COLOR_CTRL */
++	"kY",  /* AT_COLOR_ERROR */
++	"c",   /* AT_COLOR_LINENUM */
++	"Wb",  /* AT_COLOR_MARK */
++	"kC",  /* AT_COLOR_PROMPT */
++	"kc",  /* AT_COLOR_RSCROLL */
++	"kG",  /* AT_COLOR_SEARCH */
++	"",    /* AT_COLOR_HEADER */
++	"",    /* AT_UNDERLINE */
++	"",    /* AT_BOLD */
++	"",    /* AT_BLINK */
++	"",    /* AT_STANDOUT */
++};
++	memcpy(__less_line_ctx->__color_map, __color_map, sizeof(__less_line_ctx->__color_map));
++	memcpy(__less_line_ctx->ansi_step.__hlink_prefix, ESCS "]8;", 5);
++}
++define_vsf_less_mod(less_line,
++	sizeof(struct __less_line_ctx),
++	VSF_LESS_MOD_LINE,
++	__less_line_mod_init
++)
++#	define less_line_ctx		((struct __less_line_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_line)))
++#endif
+ 
+ /* State while processing an ANSI escape sequence */
+ struct ansi_state {
+@@ -640,7 +788,11 @@ ansi_step(pansi, ch)
+ 	}
+ 	if (pansi->hindex >= 0)
+ 	{
++#ifdef __VSF__
++#	define hlink_prefix		(less_line_ctx->ansi_step.__hlink_prefix)
++#else
+ 		static char hlink_prefix[] = ESCS "]8;";
++#endif
+ 		if (ch == hlink_prefix[pansi->hindex] ||
+ 		    (pansi->hindex == 0 && IS_CSI_START(ch)))
+ 		{
+@@ -650,6 +802,9 @@ ansi_step(pansi, ch)
+ 			return ANSI_MID;
+ 		}
+ 		pansi->hindex = -1; /* not a hyperlink */
++#ifdef __VSF__
++#	undef hlink_prefix
++#endif
+ 	}
+ 	/* Check for SGR sequences */
+ 	if (is_ansi_middle(ch))
+diff --git a/linenum.c b/linenum.c
+index 1808ea9..0048fd8 100644
+--- a/linenum.c
++++ b/linenum.c
+@@ -59,6 +59,19 @@ struct linenum_info
+ 
+ #define LONGTIME        (2)             /* In seconds */
+ 
++#ifdef __VSF__
++#	define anchor				(less_linenum_ctx->__anchor)
++#	define freelist				(less_linenum_ctx->__freelist)
++#	define pool					(less_linenum_ctx->__pool)
++#	define spare				(less_linenum_ctx->__spare)
++
++#	define linenums				(less_public_ctx->__linenums)
++#	define sigs					(less_public_ctx->__sigs)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define header_lines			(less_public_ctx->__header_lines)
++#	define nonum_headers		(less_public_ctx->__nonum_headers)
++#else
+ static struct linenum_info anchor;      /* Anchor of the list */
+ static struct linenum_info *freelist;   /* Anchor of the unused entries */
+ static struct linenum_info pool[NPOOL]; /* The pool itself */
+@@ -70,6 +83,27 @@ extern int sc_height;
+ extern int screen_trashed;
+ extern int header_lines;
+ extern int nonum_headers;
++#endif
++
++#ifdef __VSF__
++struct __less_linenum_ctx {
++	struct linenum_info __anchor;
++	struct linenum_info *__freelist;
++	struct linenum_info __pool[200];
++	struct linenum_info *__spare;
++
++	int __loopcount;
++#if HAVE_TIME
++	time_type __startime;
++#endif
++};
++define_vsf_less_mod(less_linenum,
++	sizeof(struct __less_linenum_ctx),
++	VSF_LESS_MOD_LINENUM,
++	NULL
++)
++#	define less_linenum_ctx		((struct __less_linenum_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_linenum)))
++#endif
+ 
+ /*
+  * Initialize the line number structures.
+@@ -216,9 +250,16 @@ longloopmessage(VOID_PARAM)
+ 	ierror("Calculating line numbers", NULL_PARG);
+ }
+ 
++#ifdef __VSF__
++#	define loopcount			(less_linenum_ctx->__loopcount)
++#if HAVE_TIME
++#	define startime				(less_linenum_ctx->__startime)
++#endif
++#else
+ static int loopcount;
+ #if HAVE_TIME
+ static time_type startime;
++#endif
+ #endif
+ 
+ 	static void
+diff --git a/lsystem.c b/lsystem.c
+index d817369..3963d7b 100644
+--- a/lsystem.c
++++ b/lsystem.c
+@@ -32,8 +32,13 @@
+ #endif
+ #endif
+ 
++#ifdef __VSF__
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#else
+ extern int screen_trashed;
+ extern IFILE curr_ifile;
++#endif
+ 
+ 
+ #if HAVE_SYSTEM
+diff --git a/main.c b/main.c
+index 98e6344..e3eecbc 100644
+--- a/main.c
++++ b/main.c
+@@ -18,6 +18,82 @@
+ #include <windows.h>
+ #endif
+ 
++#ifdef __VSF__
++static void __less_public_mod_init(void *ctx)
++{
++	struct __less_public_ctx *__less_public_ctx = ctx;
++	__less_public_ctx->__start_attnpos = NULL_POSITION;
++	__less_public_ctx->__end_attnpos = NULL_POSITION;
++	__less_public_ctx->__binattr = AT_STANDOUT|AT_COLOR_BIN;
++	__less_public_ctx->__first_time = 1;
++	__less_public_ctx->__ntabstops = 1;
++	__less_public_ctx->__tabdefault = 8;
++#if LOGFILE
++	__less_public_ctx->__logfile = -1;
++#endif
++	__less_public_ctx->__jump_sline_fraction = -1;
++	__less_public_ctx->__shift_count_fraction = -1;
++#if TAGS
++	public const char ztags[];
++	__less_public_ctx->__tags = ztags;
++#endif
++
++	extern void __less_cmdbuf_mod_init_public(struct __less_public_ctx *ctx);
++	__less_cmdbuf_mod_init_public(__less_public_ctx);
++	extern void __less_prompt_mod_init_public(struct __less_public_ctx *ctx);
++	__less_prompt_mod_init_public(__less_public_ctx);
++}
++define_vsf_less_mod(less_public,
++	sizeof(struct __less_public_ctx),
++	VSF_LESS_MOD_PUBLIC,
++	__less_public_mod_init
++)
++#endif
++
++#ifdef __VSF__
++#	define every_first_cmd		(less_public_ctx->__every_first_cmd)
++#	define new_file				(less_public_ctx->__new_file)
++#	define is_tty				(less_public_ctx->__is_tty)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#	define old_ifile			(less_public_ctx->__old_ifile)
++#	define initial_scrpos		(less_public_ctx->__initial_scrpos)
++#	define start_attnpos		(less_public_ctx->__start_attnpos)
++#	define end_attnpos			(less_public_ctx->__end_attnpos)
++#	define wscroll				(less_public_ctx->__wscroll)
++#	define progname				(less_public_ctx->__progname)
++#	define quitting				(less_public_ctx->__quitting)
++#	define secure				(less_public_ctx->__secure)
++#	define dohelp				(less_public_ctx->__dohelp)
++#if LOGFILE
++#	define logfile				(less_public_ctx->__logfile)
++#	define force_logfile		(less_public_ctx->__force_logfile)
++#	define namelogfile			(less_public_ctx->__namelogfile)
++#endif
++#if EDITOR
++#	define editor				(less_public_ctx->__editor)
++#	define editproto			(less_public_ctx->__editproto)
++#endif
++#if TAGS
++#	define tags					(less_public_ctx->__tags)
++#	define tagoption			(less_public_ctx->__tagoption)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#endif
++#	define one_screen			(less_public_ctx->__one_screen)
++#	define less_is_more			(less_public_ctx->__less_is_more)
++#	define missing_cap			(less_public_ctx->__missing_cap)
++#	define know_dumb			(less_public_ctx->__know_dumb)
++#	define pr_type				(less_public_ctx->__pr_type)
++#	define quit_if_one_screen	(less_public_ctx->__quit_if_one_screen)
++#	define no_init				(less_public_ctx->__no_init)
++#	define errmsgs				(less_public_ctx->__errmsgs)
++#	define redraw_on_quit		(less_public_ctx->__redraw_on_quit)
++#	define term_init_done		(less_public_ctx->__term_init_done)
++#	define first_time			(less_public_ctx->__first_time)
++
++#ifdef WIN32
++#	define consoleTitle			(less_main_ctx->__consoleTitle)
++#endif
++#else
+ public char *   every_first_cmd = NULL;
+ public int      new_file;
+ public int      is_tty;
+@@ -64,6 +140,25 @@ extern int      errmsgs;
+ extern int      redraw_on_quit;
+ extern int      term_init_done;
+ extern int      first_time;
++#endif
++
++#ifdef __VSF__
++struct __less_main_ctx {
++#ifdef WIN32
++	char __consoleTitle[256];
++#endif
++
++	struct {
++		int __save_status;
++	} quit;
++};
++define_vsf_less_mod(less_main,
++	sizeof(struct __less_main_ctx),
++	VSF_LESS_MOD_MAIN,
++	NULL
++)
++#	define less_main_ctx		((struct __less_main_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_main)))
++#endif
+ 
+ /*
+  * Entry point.
+@@ -397,7 +492,11 @@ sprefix(ps, s, uppercase)
+ quit(status)
+ 	int status;
+ {
++#ifdef __VSF__
++#	define save_status			(less_main_ctx->quit.__save_status)
++#else
+ 	static int save_status;
++#endif
+ 
+ 	/*
+ 	 * Put cursor at bottom left corner, clear the line,
+@@ -407,6 +506,10 @@ quit(status)
+ 		status = save_status;
+ 	else
+ 		save_status = status;
++#ifdef __VSF__
++#	undef save_status
++#endif
++
+ #if LESSTEST
+ 	rstat('Q');
+ #endif /*LESSTEST*/
+diff --git a/mark.c b/mark.c
+index f3bf0c4..c1877bf 100644
+--- a/mark.c
++++ b/mark.c
+@@ -11,10 +11,17 @@
+ #include "less.h"
+ #include "position.h"
+ 
++#ifdef __VSF__
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define perma_marks			(less_public_ctx->__perma_marks)
++#else
+ extern IFILE curr_ifile;
+ extern int sc_height;
+ extern int jump_sline;
+ extern int perma_marks;
++#endif
+ 
+ /*
+  * A mark is an ifile (input file) plus a position within the file.
+@@ -42,9 +49,29 @@ struct mark
+ #define NUMARKS         ((2*26)+1)      /* user marks (not lastmark) */
+ #define MOUSEMARK       (NMARKS-2)
+ #define LASTMARK        (NMARKS-1)
++#ifdef __VSF__
++#	define marks				(less_mark_ctx->__marks)
++#	define marks_modified		(less_public_ctx->__marks_modified)
++#else
+ static struct mark marks[NMARKS];
+ public int marks_modified = 0;
++#endif
+ 
++#ifdef __VSF__
++struct __less_mark_ctx {
++	struct mark __marks[NMARKS];
++
++	struct {
++		struct mark __sm;
++	} getmark;
++};
++define_vsf_less_mod(less_mark,
++	sizeof(struct __less_mark_ctx),
++	VSF_LESS_MOD_MARK,
++	NULL
++)
++#	define less_mark_ctx		((struct __less_mark_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_mark)))
++#endif
+ 
+ /*
+  * Initialize a mark struct.
+@@ -143,7 +170,11 @@ getmark(c)
+ 	int c;
+ {
+ 	struct mark *m;
++#ifdef __VSF__
++#	define sm					(less_mark_ctx->getmark.__sm)
++#else
+ 	static struct mark sm;
++#endif
+ 
+ 	switch (c)
+ 	{
+@@ -195,6 +226,9 @@ getmark(c)
+ 		break;
+ 	}
+ 	return (m);
++#ifdef __VSF__
++#	undef sm
++#endif
+ }
+ 
+ /*
+diff --git a/optfunc.c b/optfunc.c
+index 84333b7..fd2259d 100644
+--- a/optfunc.c
++++ b/optfunc.c
+@@ -27,6 +27,55 @@
+ #include "less.h"
+ #include "option.h"
+ 
++#ifdef __VSF__
++#	define nbufs				(less_public_ctx->__nbufs)
++#	define bufspace				(less_public_ctx->__bufspace)
++#	define pr_type				(less_public_ctx->__pr_type)
++#	define plusoption			(less_public_ctx->__plusoption)
++#	define swindow				(less_public_ctx->__swindow)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define secure				(less_public_ctx->__secure)
++#	define dohelp				(less_public_ctx->__dohelp)
++#	define is_tty				(less_public_ctx->__is_tty)
++#	define openquote			(less_public_ctx->__openquote)
++#	define closequote			(less_public_ctx->__closequote)
++#	define prproto				(less_public_ctx->__prproto)
++#	define eqproto				(less_public_ctx->__eqproto)
++#	define hproto				(less_public_ctx->__hproto)
++#	define wproto				(less_public_ctx->__wproto)
++#	define every_first_cmd		(less_public_ctx->__every_first_cmd)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define jump_sline_fraction	(less_public_ctx->__jump_sline_fraction)
++#	define shift_count			(less_public_ctx->__shift_count)
++#	define shift_count_fraction	(less_public_ctx->__shift_count_fraction)
++#	define rscroll_char			(less_public_ctx->__rscroll_char)
++#	define rscroll_attr			(less_public_ctx->__rscroll_attr)
++#	define mousecap				(less_public_ctx->__mousecap)
++#	define wheel_lines			(less_public_ctx->__wheel_lines)
++#	define less_is_more			(less_public_ctx->__less_is_more)
++#	define linenum_width		(less_public_ctx->__linenum_width)
++#	define status_col_width		(less_public_ctx->__status_col_width)
++#	define use_color			(less_public_ctx->__use_color)
++#	define want_filesize		(less_public_ctx->__want_filesize)
++#	define header_lines			(less_public_ctx->__header_lines)
++#	define header_cols			(less_public_ctx->__header_cols)
++#	define def_search_type		(less_public_ctx->__def_search_type)
++#	define chopline				(less_public_ctx->__chopline)
++#if LOGFILE
++#	define namelogfile			(less_public_ctx->__namelogfile)
++#	define force_logfile		(less_public_ctx->__force_logfile)
++#	define logfile				(less_public_ctx->__logfile)
++#endif
++#if TAGS
++#	define tagoption			(less_public_ctx->__tagoption)
++#	define tags					(less_public_ctx->__tags)
++#endif
++
++extern char ztags[];
++extern char version[];
++#else
+ extern int nbufs;
+ extern int bufspace;
+ extern int pr_type;
+@@ -90,6 +139,7 @@ extern int sgr_mode;
+ #endif
+ #endif
+ #endif
++#endif
+ 
+ 
+ #if LOGFILE
+@@ -462,9 +512,9 @@ opt__P(type, s)
+ 		case 's':  proto = &prproto[PR_SHORT];  s++;    break;
+ 		case 'm':  proto = &prproto[PR_MEDIUM]; s++;    break;
+ 		case 'M':  proto = &prproto[PR_LONG];   s++;    break;
+-		case '=':  proto = &eqproto;            s++;    break;
+-		case 'h':  proto = &hproto;             s++;    break;
+-		case 'w':  proto = &wproto;             s++;    break;
++		case '=':  proto = (char **)&eqproto;   s++;    break;
++		case 'h':  proto = (char **)&hproto;    s++;    break;
++		case 'w':  proto = (char **)&wproto;    s++;    break;
+ 		default:   proto = &prproto[PR_SHORT];          break;
+ 		}
+ 		free(*proto);
+@@ -721,9 +771,15 @@ opt_x(type, s)
+ 	int type;
+ 	char *s;
+ {
++#ifdef __VSF__
++#	define tabstops				(less_public_ctx->__tabstops)
++#	define ntabstops			(less_public_ctx->__ntabstops)
++#	define tabdefault			(less_public_ctx->__tabdefault)
++#else
+ 	extern int tabstops[];
+ 	extern int ntabstops;
+ 	extern int tabdefault;
++#endif
+ 	char msg[60+((INT_STRLEN_BOUND(int)+1)*TABSTOP_MAX)];
+ 	int i;
+ 	PARG p;
+@@ -768,6 +824,11 @@ opt_x(type, s)
+ 		error("%s", &p);
+ 		break;
+ 	}
++#ifdef __VSF__
++#	undef tabstops
++#	undef ntabstops
++#	undef tabdefault
++#endif
+ }
+ 
+ 
+diff --git a/option.c b/option.c
+index c4a496e..87a2c35 100644
+--- a/option.c
++++ b/option.c
+@@ -20,17 +20,46 @@
+ #include "less.h"
+ #include "option.h"
+ 
++#ifdef __VSF__
++#	define pendopt				(less_option_ctx->__pendopt)
++#	define plusoption			(less_public_ctx->__plusoption)
++#else
+ static struct loption *pendopt;
+ public int plusoption = FALSE;
++#endif
+ 
+ static char *optstring LESSPARAMS((char *s, char **p_str, char *printopt, char *validchars));
+ static int flip_triple LESSPARAMS((int val, int lc));
+ 
++#ifdef __VSF__
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define less_is_more			(less_public_ctx->__less_is_more)
++#	define quit_at_eof			(less_public_ctx->__quit_at_eof)
++#	define every_first_cmd		(less_public_ctx->__every_first_cmd)
++#	define opt_use_backslash	(less_public_ctx->__opt_use_backslash)
++#else
+ extern int screen_trashed;
+ extern int less_is_more;
+ extern int quit_at_eof;
+ extern char *every_first_cmd;
+ extern int opt_use_backslash;
++#endif
++
++#ifdef __VSF__
++struct __less_option_ctx {
++	struct loption *__pendopt;
++
++	struct {
++		char __buf[MAX_PRCHAR_LEN+2];
++	} propt;
++};
++define_vsf_less_mod(less_option,
++	sizeof(struct __less_option_ctx),
++	VSF_LESS_MOD_OPTION,
++	NULL
++)
++#	define less_option_ctx		((struct __less_option_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_option)))
++#endif
+ 
+ /*
+  * Return a printable description of an option.
+@@ -55,10 +84,17 @@ opt_desc(o)
+ propt(c)
+ 	int c;
+ {
++#ifdef __VSF__
++#	define buf					(less_option_ctx->propt.__buf)
++#else
+ 	static char buf[MAX_PRCHAR_LEN+2];
++#endif
+ 
+ 	sprintf(buf, "-%s", prchar(c));
+ 	return (buf);
++#ifdef __VSF__
++#	undef buf
++#endif
+ }
+ 
+ /* 
+diff --git a/opttbl.c b/opttbl.c
+index 1328e1e..bc37eaa 100644
+--- a/opttbl.c
++++ b/opttbl.c
+@@ -15,6 +15,63 @@
+ #include "less.h"
+ #include "option.h"
+ 
++#ifdef __VSF__
++#	define quiet				(less_public_ctx->__quiet)
++#	define how_search			(less_public_ctx->__how_search)
++#	define top_scroll			(less_public_ctx->__top_scroll)
++#	define pr_type				(less_public_ctx->__pr_type)
++#	define bs_mode				(less_public_ctx->__bs_mode)
++#	define know_dumb			(less_public_ctx->__know_dumb)
++#	define quit_at_eof			(less_public_ctx->__quit_at_eof)
++#	define quit_if_one_screen	(less_public_ctx->__quit_if_one_screen)
++#	define squeeze				(less_public_ctx->__squeeze)
++#	define tabstop				(less_public_ctx->__tabstop)
++#	define back_scroll			(less_public_ctx->__back_scroll)
++#	define forw_scroll			(less_public_ctx->__forw_scroll)
++#	define caseless				(less_public_ctx->__caseless)
++#	define linenums				(less_public_ctx->__linenums)
++#	define autobuf				(less_public_ctx->__autobuf)
++#	define bufspace				(less_public_ctx->__bufspace)
++#	define ctldisp				(less_public_ctx->__ctldisp)
++#	define force_open			(less_public_ctx->__force_open)
++#	define swindow				(less_public_ctx->__swindow)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define jump_sline_fraction	(less_public_ctx->__jump_sline_fraction)
++#	define shift_count_fraction	(less_public_ctx->__shift_count_fraction)
++#	define chopline				(less_public_ctx->__chopline)
++#	define no_init				(less_public_ctx->__no_init)
++#	define no_keypad			(less_public_ctx->__no_keypad)
++#	define twiddle				(less_public_ctx->__twiddle)
++#	define show_attn			(less_public_ctx->__show_attn)
++#	define shift_count			(less_public_ctx->__shift_count)
++#	define status_col			(less_public_ctx->__status_col)
++#	define use_lessopen			(less_public_ctx->__use_lessopen)
++#	define quit_on_intr			(less_public_ctx->__quit_on_intr)
++#	define follow_mode			(less_public_ctx->__follow_mode)
++#	define oldbot				(less_public_ctx->__oldbot)
++#	define opt_use_backslash	(less_public_ctx->__opt_use_backslash)
++#	define rscroll_char			(less_public_ctx->__rscroll_char)
++#	define rscroll_attr			(less_public_ctx->__rscroll_attr)
++#	define no_hist_dups			(less_public_ctx->__no_hist_dups)
++#	define mousecap				(less_public_ctx->__mousecap)
++#	define wheel_lines			(less_public_ctx->__wheel_lines)
++#	define perma_marks			(less_public_ctx->__perma_marks)
++#	define linenum_width		(less_public_ctx->__linenum_width)
++#	define status_col_width		(less_public_ctx->__status_col_width)
++#	define incr_search			(less_public_ctx->__incr_search)
++#	define use_color			(less_public_ctx->__use_color)
++#	define want_filesize		(less_public_ctx->__want_filesize)
++#	define status_line			(less_public_ctx->__status_line)
++#	define header_lines			(less_public_ctx->__header_lines)
++#	define header_cols			(less_public_ctx->__header_cols)
++#	define nonum_headers		(less_public_ctx->__nonum_headers)
++#	define redraw_on_quit		(less_public_ctx->__redraw_on_quit)
++#	define def_search_type		(less_public_ctx->__def_search_type)
++#if HILITE_SEARCH
++#	define hilite_search		(less_public_ctx->__hilite_search)
++#endif
++#	define less_is_more			(less_public_ctx->__less_is_more)
++#else
+ /*
+  * Variables controlled by command line options.
+  */
+@@ -75,84 +132,87 @@ public int hilite_search;       /* Highlight matched search patterns? */
+ #endif
+ 
+ public int less_is_more = 0;    /* Make compatible with POSIX more */
++#endif
+ 
+ /*
+  * Long option names.
+  */
+-static struct optname a_optname      = { "search-skip-screen",   NULL };
+-static struct optname b_optname      = { "buffers",              NULL };
+-static struct optname B__optname     = { "auto-buffers",         NULL };
+-static struct optname c_optname      = { "clear-screen",         NULL };
+-static struct optname d_optname      = { "dumb",                 NULL };
+-static struct optname D__optname     = { "color",                NULL };
+-static struct optname e_optname      = { "quit-at-eof",          NULL };
+-static struct optname f_optname      = { "force",                NULL };
+-static struct optname F__optname     = { "quit-if-one-screen",   NULL };
++static const struct optname a_optname      = { "search-skip-screen",   NULL };
++static const struct optname b_optname      = { "buffers",              NULL };
++static const struct optname B__optname     = { "auto-buffers",         NULL };
++static const struct optname c_optname      = { "clear-screen",         NULL };
++static const struct optname d_optname      = { "dumb",                 NULL };
++static const struct optname D__optname     = { "color",                NULL };
++static const struct optname e_optname      = { "quit-at-eof",          NULL };
++static const struct optname f_optname      = { "force",                NULL };
++static const struct optname F__optname     = { "quit-if-one-screen",   NULL };
+ #if HILITE_SEARCH
+-static struct optname g_optname      = { "hilite-search",        NULL };
++static const struct optname g_optname      = { "hilite-search",        NULL };
+ #endif
+-static struct optname h_optname      = { "max-back-scroll",      NULL };
+-static struct optname i_optname      = { "ignore-case",          NULL };
+-static struct optname j_optname      = { "jump-target",          NULL };
+-static struct optname J__optname     = { "status-column",        NULL };
++static const struct optname h_optname      = { "max-back-scroll",      NULL };
++static const struct optname i_optname      = { "ignore-case",          NULL };
++static const struct optname j_optname      = { "jump-target",          NULL };
++static const struct optname J__optname     = { "status-column",        NULL };
+ #if USERFILE
+-static struct optname k_optname      = { "lesskey-file",         NULL };
++static const struct optname k_optname      = { "lesskey-file",         NULL };
+ #if HAVE_LESSKEYSRC 
+-static struct optname ks_optname     = { "lesskey-src",          NULL };
++static const struct optname ks_optname     = { "lesskey-src",          NULL };
+ #endif /* HAVE_LESSKEYSRC */
+ #endif
+-static struct optname K__optname     = { "quit-on-intr",         NULL };
+-static struct optname L__optname     = { "no-lessopen",          NULL };
+-static struct optname m_optname      = { "long-prompt",          NULL };
+-static struct optname n_optname      = { "line-numbers",         NULL };
++static const struct optname K__optname     = { "quit-on-intr",         NULL };
++static const struct optname L__optname     = { "no-lessopen",          NULL };
++static const struct optname m_optname      = { "long-prompt",          NULL };
++static const struct optname n_optname      = { "line-numbers",         NULL };
+ #if LOGFILE
+-static struct optname o_optname      = { "log-file",             NULL };
+-static struct optname O__optname     = { "LOG-FILE",             NULL };
++static const struct optname o_optname      = { "log-file",             NULL };
++static const struct optname O__optname     = { "LOG-FILE",             NULL };
+ #endif
+-static struct optname p_optname      = { "pattern",              NULL };
+-static struct optname P__optname     = { "prompt",               NULL };
+-static struct optname q2_optname     = { "silent",               NULL };
+-static struct optname q_optname      = { "quiet",                &q2_optname };
+-static struct optname r_optname      = { "raw-control-chars",    NULL };
+-static struct optname s_optname      = { "squeeze-blank-lines",  NULL };
+-static struct optname S__optname     = { "chop-long-lines",      NULL };
++static const struct optname p_optname      = { "pattern",              NULL };
++static const struct optname P__optname     = { "prompt",               NULL };
++static const struct optname q2_optname     = { "silent",               NULL };
++#ifndef __VSF__
++static const struct optname q_optname      = { "quiet",                &q2_optname };
++#endif
++static const struct optname r_optname      = { "raw-control-chars",    NULL };
++static const struct optname s_optname      = { "squeeze-blank-lines",  NULL };
++static const struct optname S__optname     = { "chop-long-lines",      NULL };
+ #if TAGS
+-static struct optname t_optname      = { "tag",                  NULL };
+-static struct optname T__optname     = { "tag-file",             NULL };
++static const struct optname t_optname      = { "tag",                  NULL };
++static const struct optname T__optname     = { "tag-file",             NULL };
+ #endif
+-static struct optname u_optname      = { "underline-special",    NULL };
+-static struct optname V__optname     = { "version",              NULL };
+-static struct optname w_optname      = { "hilite-unread",        NULL };
+-static struct optname x_optname      = { "tabs",                 NULL };
+-static struct optname X__optname     = { "no-init",              NULL };
+-static struct optname y_optname      = { "max-forw-scroll",      NULL };
+-static struct optname z_optname      = { "window",               NULL };
+-static struct optname quote_optname  = { "quotes",               NULL };
+-static struct optname tilde_optname  = { "tilde",                NULL };
+-static struct optname query_optname  = { "help",                 NULL };
+-static struct optname pound_optname  = { "shift",                NULL };
+-static struct optname keypad_optname = { "no-keypad",            NULL };
+-static struct optname oldbot_optname = { "old-bot",              NULL };
+-static struct optname follow_optname = { "follow-name",          NULL };
+-static struct optname use_backslash_optname = { "use-backslash", NULL };
+-static struct optname rscroll_optname = { "rscroll", NULL };
+-static struct optname nohistdups_optname = { "no-histdups",      NULL };
+-static struct optname mousecap_optname = { "mouse",              NULL };
+-static struct optname wheel_lines_optname = { "wheel-lines",     NULL };
+-static struct optname perma_marks_optname = { "save-marks",      NULL };
+-static struct optname linenum_width_optname = { "line-num-width", NULL };
+-static struct optname status_col_width_optname = { "status-col-width", NULL };
+-static struct optname incr_search_optname = { "incsearch",       NULL };
+-static struct optname use_color_optname = { "use-color",         NULL };
+-static struct optname want_filesize_optname = { "file-size",     NULL };
+-static struct optname status_line_optname = { "status-line",     NULL };
+-static struct optname header_optname = { "header",               NULL };
+-static struct optname nonum_headers_optname = { "no-number-headers", NULL };
+-static struct optname redraw_on_quit_optname = { "redraw-on-quit", NULL };
+-static struct optname search_type_optname = { "search-options", NULL };
++static const struct optname u_optname      = { "underline-special",    NULL };
++static const struct optname V__optname     = { "version",              NULL };
++static const struct optname w_optname      = { "hilite-unread",        NULL };
++static const struct optname x_optname      = { "tabs",                 NULL };
++static const struct optname X__optname     = { "no-init",              NULL };
++static const struct optname y_optname      = { "max-forw-scroll",      NULL };
++static const struct optname z_optname      = { "window",               NULL };
++static const struct optname quote_optname  = { "quotes",               NULL };
++static const struct optname tilde_optname  = { "tilde",                NULL };
++static const struct optname query_optname  = { "help",                 NULL };
++static const struct optname pound_optname  = { "shift",                NULL };
++static const struct optname keypad_optname = { "no-keypad",            NULL };
++static const struct optname oldbot_optname = { "old-bot",              NULL };
++static const struct optname follow_optname = { "follow-name",          NULL };
++static const struct optname use_backslash_optname = { "use-backslash", NULL };
++static const struct optname rscroll_optname = { "rscroll", NULL };
++static const struct optname nohistdups_optname = { "no-histdups",      NULL };
++static const struct optname mousecap_optname = { "mouse",              NULL };
++static const struct optname wheel_lines_optname = { "wheel-lines",     NULL };
++static const struct optname perma_marks_optname = { "save-marks",      NULL };
++static const struct optname linenum_width_optname = { "line-num-width", NULL };
++static const struct optname status_col_width_optname = { "status-col-width", NULL };
++static const struct optname incr_search_optname = { "incsearch",       NULL };
++static const struct optname use_color_optname = { "use-color",         NULL };
++static const struct optname want_filesize_optname = { "file-size",     NULL };
++static const struct optname status_line_optname = { "status-line",     NULL };
++static const struct optname header_optname = { "header",               NULL };
++static const struct optname nonum_headers_optname = { "no-number-headers", NULL };
++static const struct optname redraw_on_quit_optname = { "redraw-on-quit", NULL };
++static const struct optname search_type_optname = { "search-options", NULL };
+ #if LESSTEST
+-static struct optname ttyin_name_optname = { "tty",              NULL };
+-static struct optname rstat_optname  = { "rstat",                NULL };
++static const struct optname ttyin_name_optname = { "tty",              NULL };
++static const struct optname rstat_optname  = { "rstat",                NULL };
+ #endif /*LESSTEST*/
+ 
+ 
+@@ -168,9 +228,28 @@ static struct optname rstat_optname  = { "rstat",                NULL };
+  * a new value, and odesc[1], if not NULL, is the set of characters
+  * that are valid in the string.
+  */
++#ifdef __VSF__
++struct __less_opttbl_ctx {
++	struct optname __q_optname;
++	struct loption __option[55];
++};
++define_vsf_less_mod(less_opttbl,
++	sizeof(struct __less_opttbl_ctx),
++	VSF_LESS_MOD_OPTTBL,
++	NULL
++)
++#	define less_opttbl_ctx		((struct __less_opttbl_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_opttbl)))
++#	define option				(less_opttbl_ctx->__option)
++static void __less_opttbl_init_option(struct __less_opttbl_ctx *ctx)
++{
++	ctx->__q_optname = (struct optname) { "quiet", (struct optname *)&q2_optname };
++	
++struct loption __option[] =
++#else
+ static struct loption option[] =
++#endif
+ {
+-	{ 'a', &a_optname,
++	{ 'a', (struct optname *)&a_optname,
+ 		TRIPLE, OPT_ONPLUS, &how_search, NULL,
+ 		{
+ 			"Search includes displayed screen",
+@@ -179,7 +258,7 @@ static struct loption option[] =
+ 		}
+ 	},
+ 
+-	{ 'b', &b_optname,
++	{ 'b', (struct optname *)&b_optname,
+ 		NUMBER|INIT_HANDLER, 64, &bufspace, opt_b, 
+ 		{
+ 			"Max buffer space per file (K): ",
+@@ -187,7 +266,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'B', &B__optname,
++	{ 'B', (struct optname *)&B__optname,
+ 		BOOL, OPT_ON, &autobuf, NULL,
+ 		{
+ 			"Don't automatically allocate buffers",
+@@ -195,7 +274,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'c', &c_optname,
++	{ 'c', (struct optname *)&c_optname,
+ 		TRIPLE, OPT_OFF, &top_scroll, NULL,
+ 		{
+ 			"Repaint by scrolling from bottom of screen",
+@@ -203,7 +282,7 @@ static struct loption option[] =
+ 			"Repaint by painting from top of screen"
+ 		}
+ 	},
+-	{ 'd', &d_optname,
++	{ 'd', (struct optname *)&d_optname,
+ 		BOOL|NO_TOGGLE, OPT_OFF, &know_dumb, NULL,
+ 		{
+ 			"Assume intelligent terminal",
+@@ -211,7 +290,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'D', &D__optname,
++	{ 'D', (struct optname *)&D__optname,
+ 		STRING|REPAINT|NO_QUERY, 0, NULL, opt_D,
+ 		{
+ 			"color desc: ", 
+@@ -219,7 +298,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'e', &e_optname,
++	{ 'e', (struct optname *)&e_optname,
+ 		TRIPLE, OPT_OFF, &quit_at_eof, NULL,
+ 		{
+ 			"Don't quit at end-of-file",
+@@ -227,7 +306,7 @@ static struct loption option[] =
+ 			"Quit immediately at end-of-file"
+ 		}
+ 	},
+-	{ 'f', &f_optname,
++	{ 'f', (struct optname *)&f_optname,
+ 		BOOL, OPT_OFF, &force_open, NULL,
+ 		{
+ 			"Open only regular files",
+@@ -235,7 +314,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'F', &F__optname,
++	{ 'F', (struct optname *)&F__optname,
+ 		BOOL, OPT_OFF, &quit_if_one_screen, NULL,
+ 		{
+ 			"Don't quit if end-of-file on first screen",
+@@ -244,7 +323,7 @@ static struct loption option[] =
+ 		}
+ 	},
+ #if HILITE_SEARCH
+-	{ 'g', &g_optname,
++	{ 'g', (struct optname *)&g_optname,
+ 		TRIPLE|HL_REPAINT, OPT_ONPLUS, &hilite_search, NULL,
+ 		{
+ 			"Don't highlight search matches",
+@@ -253,7 +332,7 @@ static struct loption option[] =
+ 		}
+ 	},
+ #endif
+-	{ 'h', &h_optname,
++	{ 'h', (struct optname *)&h_optname,
+ 		NUMBER, -1, &back_scroll, NULL,
+ 		{
+ 			"Backwards scroll limit: ",
+@@ -261,7 +340,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'i', &i_optname,
++	{ 'i', (struct optname *)&i_optname,
+ 		TRIPLE|HL_REPAINT, OPT_OFF, &caseless, opt_i,
+ 		{
+ 			"Case is significant in searches",
+@@ -269,7 +348,7 @@ static struct loption option[] =
+ 			"Ignore case in searches and in patterns"
+ 		}
+ 	},
+-	{ 'j', &j_optname,
++	{ 'j', (struct optname *)&j_optname,
+ 		STRING, 0, NULL, opt_j,
+ 		{
+ 			"Target line: ",
+@@ -277,7 +356,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'J', &J__optname,
++	{ 'J', (struct optname *)&J__optname,
+ 		BOOL|REPAINT, OPT_OFF, &status_col, NULL,
+ 		{
+ 			"Don't display a status column",
+@@ -286,18 +365,18 @@ static struct loption option[] =
+ 		}
+ 	},
+ #if USERFILE
+-	{ 'k', &k_optname,
++	{ 'k', (struct optname *)&k_optname,
+ 		STRING|NO_TOGGLE|NO_QUERY, 0, NULL, opt_k,
+ 		{ NULL, NULL, NULL }
+ 	},
+ #if HAVE_LESSKEYSRC 
+-	{ OLETTER_NONE, &ks_optname,
++	{ OLETTER_NONE, (struct optname *)&ks_optname,
+ 		STRING|NO_TOGGLE|NO_QUERY, 0, NULL, opt_ks,
+ 		{ NULL, NULL, NULL }
+ 	},
+ #endif /* HAVE_LESSKEYSRC */
+ #endif
+-	{ 'K', &K__optname,
++	{ 'K', (struct optname *)&K__optname,
+ 		BOOL, OPT_OFF, &quit_on_intr, NULL,
+ 		{
+ 			"Interrupt (ctrl-C) returns to prompt",
+@@ -305,7 +384,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'L', &L__optname,
++	{ 'L', (struct optname *)&L__optname,
+ 		BOOL, OPT_ON, &use_lessopen, NULL,
+ 		{
+ 			"Don't use the LESSOPEN filter",
+@@ -313,7 +392,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'm', &m_optname,
++	{ 'm', (struct optname *)&m_optname,
+ 		TRIPLE, OPT_OFF, &pr_type, NULL,
+ 		{
+ 			"Short prompt",
+@@ -321,7 +400,7 @@ static struct loption option[] =
+ 			"Long prompt"
+ 		}
+ 	},
+-	{ 'n', &n_optname,
++	{ 'n', (struct optname *)&n_optname,
+ 		TRIPLE|REPAINT, OPT_ON, &linenums, NULL,
+ 		{
+ 			"Don't use line numbers",
+@@ -330,24 +409,24 @@ static struct loption option[] =
+ 		}
+ 	},
+ #if LOGFILE
+-	{ 'o', &o_optname,
++	{ 'o', (struct optname *)&o_optname,
+ 		STRING, 0, NULL, opt_o,
+ 		{ "log file: ", NULL, NULL }
+ 	},
+-	{ 'O', &O__optname,
++	{ 'O', (struct optname *)&O__optname,
+ 		STRING, 0, NULL, opt__O,
+ 		{ "Log file: ", NULL, NULL }
+ 	},
+ #endif
+-	{ 'p', &p_optname,
++	{ 'p', (struct optname *)&p_optname,
+ 		STRING|NO_TOGGLE|NO_QUERY, 0, NULL, opt_p,
+ 		{ NULL, NULL, NULL }
+ 	},
+-	{ 'P', &P__optname,
++	{ 'P', (struct optname *)&P__optname,
+ 		STRING, 0, NULL, opt__P,
+ 		{ "prompt: ", NULL, NULL }
+ 	},
+-	{ 'q', &q_optname,
++	{ 'q', (struct optname *)&ctx->__q_optname,
+ 		TRIPLE, OPT_OFF, &quiet, NULL,
+ 		{
+ 			"Ring the bell for errors AND at eof/bof",
+@@ -355,7 +434,7 @@ static struct loption option[] =
+ 			"Never ring the bell"
+ 		}
+ 	},
+-	{ 'r', &r_optname,
++	{ 'r', (struct optname *)&r_optname,
+ 		TRIPLE|REPAINT, OPT_OFF, &ctldisp, NULL,
+ 		{
+ 			"Display control characters as ^X",
+@@ -363,7 +442,7 @@ static struct loption option[] =
+ 			"Display ANSI sequences directly, other control characters as ^X"
+ 		}
+ 	},
+-	{ 's', &s_optname,
++	{ 's', (struct optname *)&s_optname,
+ 		BOOL|REPAINT, OPT_OFF, &squeeze, NULL,
+ 		{
+ 			"Display all blank lines",
+@@ -371,7 +450,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'S', &S__optname,
++	{ 'S', (struct optname *)&S__optname,
+ 		BOOL|REPAINT, OPT_OFF, &chopline, NULL,
+ 		{
+ 			"Fold long lines",
+@@ -380,16 +459,16 @@ static struct loption option[] =
+ 		}
+ 	},
+ #if TAGS
+-	{ 't', &t_optname,
++	{ 't', (struct optname *)&t_optname,
+ 		STRING|NO_QUERY, 0, NULL, opt_t,
+ 		{ "tag: ", NULL, NULL }
+ 	},
+-	{ 'T', &T__optname,
++	{ 'T', (struct optname *)&T__optname,
+ 		STRING, 0, NULL, opt__T,
+ 		{ "tags file: ", NULL, NULL }
+ 	},
+ #endif
+-	{ 'u', &u_optname,
++	{ 'u', (struct optname *)&u_optname,
+ 		TRIPLE|REPAINT, OPT_OFF, &bs_mode, NULL,
+ 		{
+ 			"Display underlined text in underline mode",
+@@ -397,11 +476,11 @@ static struct loption option[] =
+ 			"Print backspace as ^H"
+ 		}
+ 	},
+-	{ 'V', &V__optname,
++	{ 'V', (struct optname *)&V__optname,
+ 		NOVAR, 0, NULL, opt__V,
+ 		{ NULL, NULL, NULL }
+ 	},
+-	{ 'w', &w_optname,
++	{ 'w', (struct optname *)&w_optname,
+ 		TRIPLE|REPAINT, OPT_OFF, &show_attn, NULL,
+ 		{
+ 			"Don't highlight first unread line",
+@@ -409,7 +488,7 @@ static struct loption option[] =
+ 			"Highlight first unread line after any forward movement",
+ 		}
+ 	},
+-	{ 'x', &x_optname,
++	{ 'x', (struct optname *)&x_optname,
+ 		STRING|REPAINT, 0, NULL, opt_x,
+ 		{
+ 			"Tab stops: ",
+@@ -417,7 +496,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'X', &X__optname,
++	{ 'X', (struct optname *)&X__optname,
+ 		BOOL|NO_TOGGLE, OPT_OFF, &no_init, NULL,
+ 		{
+ 			"Send init/deinit strings to terminal",
+@@ -425,7 +504,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'y', &y_optname,
++	{ 'y', (struct optname *)&y_optname,
+ 		NUMBER, -1, &forw_scroll, NULL,
+ 		{
+ 			"Forward scroll limit: ",
+@@ -433,7 +512,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ 'z', &z_optname,
++	{ 'z', (struct optname *)&z_optname,
+ 		NUMBER, -1, &swindow, NULL,
+ 		{
+ 			"Scroll window size: ",
+@@ -441,11 +520,11 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ '"', &quote_optname,
++	{ '"', (struct optname *)&quote_optname,
+ 		STRING, 0, NULL, opt_quote,
+ 		{ "quotes: ", NULL, NULL }
+ 	},
+-	{ '~', &tilde_optname,
++	{ '~', (struct optname *)&tilde_optname,
+ 		BOOL|REPAINT, OPT_ON, &twiddle, NULL,
+ 		{
+ 			"Don't show tildes after end of file",
+@@ -453,11 +532,11 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ '?', &query_optname,
++	{ '?', (struct optname *)&query_optname,
+ 		NOVAR, 0, NULL, opt_query,
+ 		{ NULL, NULL, NULL }
+ 	},
+-	{ '#', &pound_optname,
++	{ '#', (struct optname *)&pound_optname,
+ 		STRING, 0, NULL, opt_shift,
+ 		{
+ 			"Horizontal shift: ",
+@@ -465,7 +544,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &keypad_optname,
++	{ OLETTER_NONE, (struct optname *)&keypad_optname,
+ 		BOOL|NO_TOGGLE, OPT_OFF, &no_keypad, NULL,
+ 		{
+ 			"Use keypad mode",
+@@ -473,7 +552,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &oldbot_optname,
++	{ OLETTER_NONE, (struct optname *)&oldbot_optname,
+ 		BOOL, OPT_OFF, &oldbot, NULL,
+ 		{
+ 			"Use new bottom of screen behavior",
+@@ -481,7 +560,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &follow_optname,
++	{ OLETTER_NONE, (struct optname *)&follow_optname,
+ 		BOOL, FOLLOW_DESC, &follow_mode, NULL,
+ 		{
+ 			"F command follows file descriptor",
+@@ -489,7 +568,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &use_backslash_optname,
++	{ OLETTER_NONE, (struct optname *)&use_backslash_optname,
+ 		BOOL, OPT_OFF, &opt_use_backslash, NULL,
+ 		{
+ 			"Use backslash escaping in command line parameters",
+@@ -497,11 +576,11 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &rscroll_optname,
++	{ OLETTER_NONE, (struct optname *)&rscroll_optname,
+ 		STRING|REPAINT|INIT_HANDLER, 0, NULL, opt_rscroll,
+ 		{ "right scroll character: ", NULL, NULL }
+ 	},
+-	{ OLETTER_NONE, &nohistdups_optname,
++	{ OLETTER_NONE, (struct optname *)&nohistdups_optname,
+ 		BOOL, OPT_OFF, &no_hist_dups, NULL,
+ 		{
+ 			"Allow duplicates in history list",
+@@ -509,7 +588,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &mousecap_optname,
++	{ OLETTER_NONE, (struct optname *)&mousecap_optname,
+ 		TRIPLE, OPT_OFF, &mousecap, opt_mousecap,
+ 		{
+ 			"Ignore mouse input",
+@@ -517,7 +596,7 @@ static struct loption option[] =
+ 			"Use the mouse for scrolling (reverse)"
+ 		}
+ 	},
+-	{ OLETTER_NONE, &wheel_lines_optname,
++	{ OLETTER_NONE, (struct optname *)&wheel_lines_optname,
+ 		NUMBER|INIT_HANDLER, 0, &wheel_lines, opt_wheel_lines,
+ 		{
+ 			"Lines to scroll on mouse wheel: ",
+@@ -525,7 +604,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &perma_marks_optname,
++	{ OLETTER_NONE, (struct optname *)&perma_marks_optname,
+ 		BOOL, OPT_OFF, &perma_marks, NULL,
+ 		{
+ 			"Don't save marks in history file",
+@@ -533,7 +612,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &linenum_width_optname,
++	{ OLETTER_NONE, (struct optname *)&linenum_width_optname,
+ 		NUMBER|REPAINT, MIN_LINENUM_WIDTH, &linenum_width, opt_linenum_width,
+ 		{
+ 			"Line number width: ",
+@@ -541,7 +620,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &status_col_width_optname,
++	{ OLETTER_NONE, (struct optname *)&status_col_width_optname,
+ 		NUMBER|REPAINT, 2, &status_col_width, opt_status_col_width,
+ 		{
+ 			"Status column width: ",
+@@ -549,7 +628,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &incr_search_optname,
++	{ OLETTER_NONE, (struct optname *)&incr_search_optname,
+ 		BOOL, OPT_OFF, &incr_search, NULL,
+ 		{
+ 			"Incremental search is off",
+@@ -557,7 +636,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &use_color_optname,
++	{ OLETTER_NONE, (struct optname *)&use_color_optname,
+ 		BOOL|REPAINT, OPT_OFF, &use_color, NULL,
+ 		{
+ 			"Don't use color",
+@@ -565,7 +644,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &want_filesize_optname,
++	{ OLETTER_NONE, (struct optname *)&want_filesize_optname,
+ 		BOOL|REPAINT, OPT_OFF, &want_filesize, opt_filesize,
+ 		{
+ 			"Don't get size of each file",
+@@ -573,7 +652,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &status_line_optname,
++	{ OLETTER_NONE, (struct optname *)&status_line_optname,
+ 		BOOL|REPAINT, OPT_OFF, &status_line, NULL,
+ 		{
+ 			"Don't color each line with its status column color",
+@@ -581,7 +660,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &header_optname,
++	{ OLETTER_NONE, (struct optname *)&header_optname,
+ 		STRING|REPAINT, 0, NULL, opt_header,
+ 		{
+ 			"Header lines: ",
+@@ -589,7 +668,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &nonum_headers_optname,
++	{ OLETTER_NONE, (struct optname *)&nonum_headers_optname,
+ 		BOOL|REPAINT, 0, &nonum_headers, NULL,
+ 		{
+ 			"Number header lines",
+@@ -597,7 +676,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &redraw_on_quit_optname,
++	{ OLETTER_NONE, (struct optname *)&redraw_on_quit_optname,
+ 		BOOL, OPT_OFF, &redraw_on_quit, NULL,
+ 		{
+ 			"Don't redraw screen when quitting",
+@@ -605,7 +684,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &search_type_optname,
++	{ OLETTER_NONE, (struct optname *)&search_type_optname,
+ 		STRING, 0, NULL, opt_search_type,
+ 		{
+ 			"Search options: ",
+@@ -614,7 +693,7 @@ static struct loption option[] =
+ 		}
+ 	},
+ #if LESSTEST
+-	{ OLETTER_NONE, &ttyin_name_optname,
++	{ OLETTER_NONE, (struct optname *)&ttyin_name_optname,
+ 		STRING|NO_TOGGLE, 0, NULL, opt_ttyin_name,
+ 		{
+ 			NULL,
+@@ -622,7 +701,7 @@ static struct loption option[] =
+ 			NULL
+ 		}
+ 	},
+-	{ OLETTER_NONE, &rstat_optname,
++	{ OLETTER_NONE, (struct optname *)&rstat_optname,
+ 		STRING|NO_TOGGLE, 0, NULL, opt_rstat,
+ 		{
+ 			NULL,
+@@ -633,7 +712,11 @@ static struct loption option[] =
+ #endif /*LESSTEST*/
+ 	{ '\0', NULL, NOVAR, 0, NULL, NULL, { NULL, NULL, NULL } }
+ };
+-
++#ifdef __VSF__
++	VSF_LINUX_ASSERT(dimof(less_opttbl_ctx->__option) >= dimof(__option));
++	memcpy(less_opttbl_ctx->__option, __option, sizeof(__option));
++}
++#endif
+ 
+ /*
+  * Initialize each option to its default value.
+diff --git a/os.c b/os.c
+index aaeaf0b..8d46706 100644
+--- a/os.c
++++ b/os.c
+@@ -60,6 +60,17 @@
+ #define LONG_JUMP       longjmp
+ #endif
+ 
++#ifdef __VSF__
++#	define reading				(less_public_ctx->__reading)
++#	define consecutive_nulls	(less_public_ctx->__consecutive_nulls)
++#	define sigs					(less_public_ctx->__sigs)
++#	define ignore_eoi			(less_public_ctx->__ignore_eoi)
++#if !MSDOS_COMPILER
++#	define tty					(less_public_ctx->__tty)
++#endif
++
++#	define read_label			(less_os_ctx->__read_label)
++#else
+ public int reading;
+ public int consecutive_nulls = 0;
+ 
+@@ -70,6 +81,24 @@ extern int ignore_eoi;
+ #if !MSDOS_COMPILER
+ extern int tty;
+ #endif
++#endif
++
++#ifdef __VSF__
++struct __less_os_ctx {
++	jmp_buf __read_label;
++#if !HAVE_STRERROR
++	struct {
++		char __buf[INT_STRLEN_BOUND(int)+12];
++	} strerror;
++#endif
++};
++define_vsf_less_mod(less_os,
++	sizeof(struct __less_os_ctx),
++	VSF_LESS_MOD_OS,
++	NULL
++)
++#	define less_os_ctx			((struct __less_os_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_os)))
++#endif
+ 
+ #if USE_POLL
+ /*
+@@ -265,7 +294,11 @@ get_time(VOID_PARAM)
+ strerror(err)
+ 	int err;
+ {
++#ifdef __VSF__
++#	define buf					(less_os_ctx->strerror.__buf)
++#else
+ 	static char buf[INT_STRLEN_BOUND(int)+12];
++#endif
+ #if HAVE_SYS_ERRLIST
+ 	extern char *sys_errlist[];
+ 	extern int sys_nerr;
+@@ -275,6 +308,9 @@ strerror(err)
+ #endif
+ 	sprintf(buf, "Error %d", err);
+ 	return buf;
++#ifdef __VSF__
++#	undef buf
++#endif
+ }
+ #endif
+ 
+diff --git a/output.c b/output.c
+index 3fed3df..dea8c91 100644
+--- a/output.c
++++ b/output.c
+@@ -20,6 +20,19 @@
+ #endif
+ #endif
+ 
++#ifdef __VSF__
++#	define errmsgs				(less_public_ctx->__errmsgs)
++#	define need_clr				(less_public_ctx->__need_clr)
++#	define final_attr			(less_public_ctx->__final_attr)
++#	define at_prompt			(less_public_ctx->__at_prompt)
++#	define sigs					(less_public_ctx->__sigs)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define so_s_width			(less_public_ctx->__so_s_width)
++#	define so_e_width			(less_public_ctx->__so_e_width)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define is_tty				(less_public_ctx->__is_tty)
++#	define oldbot				(less_public_ctx->__oldbot)
++#else
+ public int errmsgs;    /* Count of messages displayed by error() */
+ public int need_clr;
+ public int final_attr;
+@@ -44,6 +57,27 @@ extern int sgr_mode;
+ extern int vt_enabled;
+ #endif
+ #endif
++#endif
++
++#ifdef __VSF__
++struct __less_output_ctx {
++	char __obuf[OUTBUF_SIZE];
++	char *__ob;					// = obuf;
++	int __outfd;				// = 2;
++};
++static void __less_output_mod_init(void *ctx)
++{
++	struct __less_output_ctx *__less_output_ctx = ctx;
++	__less_output_ctx->__ob = __less_output_ctx->__obuf;
++	__less_output_ctx->__outfd = 2;
++}
++define_vsf_less_mod(less_output,
++	sizeof(struct __less_output_ctx),
++	VSF_LESS_MOD_OUTPUT,
++	__less_output_mod_init
++)
++#	define less_output_ctx		((struct __less_output_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_output)))
++#endif
+ 
+ /*
+  * Display the line which is in the line buffer.
+@@ -79,9 +113,15 @@ put_line(VOID_PARAM)
+ 	at_exit();
+ }
+ 
++#ifdef __VSF__
++#	define obuf					(less_output_ctx->__obuf)
++#	define ob					(less_output_ctx->__ob)
++#	define outfd				(less_output_ctx->__outfd)
++#else
+ static char obuf[OUTBUF_SIZE];
+ static char *ob = obuf;
+ static int outfd = 2; /* stderr */
++#endif
+ 
+ #if MSDOS_COMPILER==WIN32C || MSDOS_COMPILER==BORLANDC || MSDOS_COMPILER==DJGPPC
+ 	static void
+@@ -641,7 +681,7 @@ error(fmt, parg)
+ 	PARG *parg;
+ {
+ 	int col = 0;
+-	static char return_to_continue[] = "  (press RETURN)";
++	static const char return_to_continue[] = "  (press RETURN)";
+ 
+ 	errmsgs++;
+ 
+@@ -678,7 +718,7 @@ error(fmt, parg)
+ 	flush();
+ }
+ 
+-static char intr_to_abort[] = "... (interrupt to abort)";
++static const char intr_to_abort[] = "... (interrupt to abort)";
+ 
+ /*
+  * Output a message in the lower left corner of the screen
+diff --git a/pattern.c b/pattern.c
+index bed36df..0c67194 100644
+--- a/pattern.c
++++ b/pattern.c
+@@ -13,9 +13,15 @@
+ 
+ #include "less.h"
+ 
++#ifdef __VSF__
++#	define caseless				(less_public_ctx->__caseless)
++#	define is_caseless			(less_public_ctx->__is_caseless)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#else
+ extern int caseless;
+ extern int is_caseless;
+ extern int utf_mode;
++#endif
+ 
+ /*
+  * Compile a search pattern, for future use by match_pattern.
+diff --git a/position.c b/position.c
+index eabaf7e..7fe2df3 100644
+--- a/position.c
++++ b/position.c
+@@ -21,11 +21,33 @@
+ #include "less.h"
+ #include "position.h"
+ 
++#ifdef __VSF__
++#	define table				(less_position_ctx->__table)
++#	define table_size			(less_position_ctx->__table_size)
++
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define header_lines			(less_public_ctx->__header_lines)
++#else
+ static POSITION *table = NULL;  /* The position table */
+ static int table_size = 0;
+ 
+ extern int sc_width, sc_height;
+ extern int header_lines;
++#endif
++
++#ifdef __VSF__
++struct __less_position_ctx {
++	POSITION *__table;
++	int __table_size;
++};
++define_vsf_less_mod(less_position,
++	sizeof(struct __less_position_ctx),
++	VSF_LESS_MOD_POSITION,
++	NULL
++)
++#	define less_position_ctx	((struct __less_position_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_position)))
++#endif
+ 
+ /*
+  * Return the starting file position of a line displayed on the screen.
+diff --git a/prompt.c b/prompt.c
+index 5319c40..bb2f0f2 100644
+--- a/prompt.c
++++ b/prompt.c
+@@ -20,6 +20,24 @@
+ #include "less.h"
+ #include "position.h"
+ 
++#ifdef __VSF__
++#	define pr_type				(less_public_ctx->__pr_type)
++#	define new_file				(less_public_ctx->__new_file)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define so_s_width			(less_public_ctx->__so_s_width)
++#	define so_e_width			(less_public_ctx->__so_e_width)
++#	define linenums				(less_public_ctx->__linenums)
++#	define hshift				(less_public_ctx->__hshift)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define less_is_more			(less_public_ctx->__less_is_more)
++#	define header_lines			(less_public_ctx->__header_lines)
++#	define curr_ifile			(less_public_ctx->__curr_ifile)
++#if EDITOR
++#	define editor				(less_public_ctx->__editor)
++#	define editproto			(less_public_ctx->__editproto)
++#endif
++#else
+ extern int pr_type;
+ extern int new_file;
+ extern int sc_width;
+@@ -35,6 +53,7 @@ extern IFILE curr_ifile;
+ extern char *editor;
+ extern char *editproto;
+ #endif
++#endif
+ 
+ /*
+  * Prototypes for the three flavors of prompts.
+@@ -55,6 +74,15 @@ static constant char w_proto[] =
+ static constant char more_proto[] =
+   "--More--(?eEND ?x- Next\\: %x.:?pB%pB\\%:byte %bB?s/%s...%t)";
+ 
++#ifdef __VSF__
++#	define prproto				(less_public_ctx->__prproto)
++#	define eqproto				(less_public_ctx->__eqproto)
++#	define hproto				(less_public_ctx->__hproto)
++#	define wproto				(less_public_ctx->__wproto)
++
++#	define message				(less_prompt_ctx->__message)
++#	define mp					(less_prompt_ctx->__mp)
++#else
+ public char *prproto[3];
+ public char constant *eqproto = e_proto;
+ public char constant *hproto = h_proto;
+@@ -62,6 +90,26 @@ public char constant *wproto = w_proto;
+ 
+ static char message[PROMPT_SIZE];
+ static char *mp;
++#endif
++
++#ifdef __VSF__
++struct __less_prompt_ctx {
++	char __message[PROMPT_SIZE];
++	char *__mp;
++};
++define_vsf_less_mod(less_prompt,
++	sizeof(struct __less_prompt_ctx),
++	VSF_LESS_MOD_PROMPT,
++	NULL
++)
++void __less_prompt_mod_init_public(struct __less_public_ctx *ctx)
++{
++	ctx->__eqproto = e_proto;
++	ctx->__hproto = h_proto;
++	ctx->__wproto = w_proto;
++}
++#	define less_prompt_ctx		((struct __less_prompt_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_prompt)))
++#endif
+ 
+ /*
+  * Initialize the prompt prototype strings.
+diff --git a/regexp.c b/regexp.c
+index fcf7c9a..bdbbd62 100644
+--- a/regexp.c
++++ b/regexp.c
+@@ -75,6 +75,27 @@
+  * to the thing following the set of BRANCHes.)  The opcodes are:
+  */
+ 
++#ifdef __VSF__
++struct __less_regexp_ctx {
++	char *__regparse;
++	int __regnpar;
++	char __regdummy;
++	char *__regcode;
++	long __regsize;
++
++	char *__reginput;
++	char *__regbol;
++	char **__regstartp;
++	char **__regendp;
++};
++define_vsf_less_mod(less_regexp,
++	sizeof(struct __less_regexp_ctx),
++	VSF_LESS_MOD_REGEXP,
++	NULL
++)
++#	define less_regexp_ctx		((struct __less_regexp_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_regexp)))
++#endif
++
+ /* definition	number	opnd?	meaning */
+ #undef EOL
+ #define	END	0	/* no	End of program. */
+@@ -158,11 +179,19 @@
+ /*
+  * Global work variables for regcomp().
+  */
++#ifdef __VSF__
++#	define regparse				(less_regexp_ctx->__regparse)
++#	define regnpar				(less_regexp_ctx->__regnpar)
++#	define regdummy				(less_regexp_ctx->__regdummy)
++#	define regcode				(less_regexp_ctx->__regcode)
++#	define regsize				(less_regexp_ctx->__regsize)
++#else
+ static char *regparse;		/* Input-scan pointer. */
+ static int regnpar;		/* () count. */
+ static char regdummy;
+ static char *regcode;		/* Code-emit pointer; &regdummy = don't. */
+ static long regsize;		/* Code size. */
++#endif
+ 
+ /*
+  * The first byte of the regexp internal "program" is actually this magic
+@@ -701,10 +730,17 @@ char *val;
+ /*
+  * Global work variables for regexec().
+  */
++#ifdef __VSF__
++#	define reginput				(less_regexp_ctx->__reginput)
++#	define regbol				(less_regexp_ctx->__regbol)
++#	define regstartp			(less_regexp_ctx->__regstartp)
++#	define regendp				(less_regexp_ctx->__regendp)
++#else
+ static char *reginput;		/* String-input pointer. */
+ static char *regbol;		/* Beginning of input, for ^ check. */
+ static char **regstartp;	/* Pointer to startp array. */
+ static char **regendp;		/* Ditto for endp. */
++#endif
+ 
+ /*
+  * Forwards.
+diff --git a/screen.c b/screen.c
+index aa31804..cc4fdca 100644
+--- a/screen.c
++++ b/screen.c
+@@ -183,6 +183,34 @@ public int vt_enabled = -1;     /* Is virtual terminal processing available? */
+ #endif
+ #else
+ 
++#ifdef __VSF__
++#	define sc_pad				(less_screen_ctx->__sc_pad)
++#	define sc_home				(less_screen_ctx->__sc_home)
++#	define sc_addline			(less_screen_ctx->__sc_addline)
++#	define sc_lower_left		(less_screen_ctx->__sc_lower_left)
++#	define sc_return			(less_screen_ctx->__sc_return)
++#	define sc_move				(less_screen_ctx->__sc_move)
++#	define sc_clear				(less_screen_ctx->__sc_clear)
++#	define sc_eol_clear			(less_screen_ctx->__sc_eol_clear)
++#	define sc_eos_clear			(less_screen_ctx->__sc_eos_clear)
++#	define sc_s_in				(less_screen_ctx->__sc_s_in)
++#	define sc_s_out				(less_screen_ctx->__sc_s_out)
++#	define sc_u_in				(less_screen_ctx->__sc_u_in)
++#	define sc_u_out				(less_screen_ctx->__sc_u_out)
++#	define sc_b_in				(less_screen_ctx->__sc_b_in)
++#	define sc_b_out				(less_screen_ctx->__sc_b_out)
++#	define sc_bl_in				(less_screen_ctx->__sc_bl_in)
++#	define sc_bl_out			(less_screen_ctx->__sc_bl_out)
++#	define sc_visual_bell		(less_screen_ctx->__sc_visual_bell)
++#	define sc_backspace			(less_screen_ctx->__sc_backspace)
++#	define sc_s_keypad			(less_screen_ctx->__sc_s_keypad)
++#	define sc_e_keypad			(less_screen_ctx->__sc_e_keypad)
++#	define sc_s_mousecap		(less_screen_ctx->__sc_s_mousecap)
++#	define sc_e_mousecap		(less_screen_ctx->__sc_e_mousecap)
++#	define sc_init				(less_screen_ctx->__sc_init)
++#	define sc_deinit			(less_screen_ctx->__sc_deinit)
++#	define attrcolor			(less_screen_ctx->__attrcolor)
++#else
+ /*
+  * Strings passed to tputs() to do various terminal functions.
+  */
+@@ -215,7 +243,42 @@ static char
+ 
+ static int attrcolor = -1;
+ #endif
++#endif
+ 
++#ifdef __VSF__
++#	define init_done			(less_screen_ctx->__init_done)
++#	define attrmode				(less_screen_ctx->__attrmode)
++#	define termcap_debug		(less_screen_ctx->__termcap_debug)
++
++#	define auto_wrap			(less_public_ctx->__auto_wrap)
++#	define ignaw				(less_public_ctx->__ignaw)
++#	define erase_char			(less_public_ctx->__erase_char)
++#	define erase2_char			(less_public_ctx->__erase2_char)
++#	define kill_char			(less_public_ctx->__kill_char)
++#	define werase_char			(less_public_ctx->__werase_char)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define bo_s_width			(less_public_ctx->__bo_s_width)
++#	define bo_e_width			(less_public_ctx->__bo_e_width)
++#	define ul_s_width			(less_public_ctx->__ul_s_width)
++#	define ul_e_width			(less_public_ctx->__ul_e_width)
++#	define so_s_width			(less_public_ctx->__so_s_width)
++#	define so_e_width			(less_public_ctx->__so_e_width)
++#	define bl_s_width			(less_public_ctx->__bl_s_width)
++#	define bl_e_width			(less_public_ctx->__bl_e_width)
++#	define above_mem			(less_public_ctx->__above_mem)
++#	define below_mem			(less_public_ctx->__below_mem)
++#	define can_goto_line		(less_public_ctx->__can_goto_line)
++#	define clear_bg				(less_public_ctx->__clear_bg)
++#	define missing_cap			(less_public_ctx->__missing_cap)
++#	define kent					(less_public_ctx->__kent)
++#	define term_init_done		(less_public_ctx->__term_init_done)
++#	define binattr				(less_public_ctx->__binattr)
++#	define one_screen			(less_public_ctx->__one_screen)
++#if LESSTEST
++#	define ttyin_name			(less_public_ctx->__ttyin_name)
++#endif
++#else
+ static int init_done = 0;
+ 
+ public int auto_wrap;           /* Terminal does \r\n when write past margin */
+@@ -243,6 +306,7 @@ extern int one_screen;
+ #if LESSTEST
+ extern char *ttyin_name;
+ #endif /*LESSTEST*/
++#endif
+ 
+ #if !MSDOS_COMPILER
+ static char *cheaper LESSPARAMS((char *t1, char *t2, char *def));
+@@ -263,6 +327,26 @@ short ospeed;
+ char PC_, *UP, *BC;
+ #endif
+ 
++#ifdef __VSF__
++#	define quiet				(less_public_ctx->__quiet)
++#	define no_back_scroll		(less_public_ctx->__no_back_scroll)
++#	define swindow				(less_public_ctx->__swindow)
++#	define no_init				(less_public_ctx->__no_init)
++#	define no_keypad			(less_public_ctx->__no_keypad)
++#	define sigs					(less_public_ctx->__sigs)
++#	define wscroll				(less_public_ctx->__wscroll)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define top_scroll			(less_public_ctx->__top_scroll)
++#	define quit_if_one_screen	(less_public_ctx->__quit_if_one_screen)
++#	define oldbot				(less_public_ctx->__oldbot)
++#	define mousecap				(less_public_ctx->__mousecap)
++#	define is_tty				(less_public_ctx->__is_tty)
++#	define use_color			(less_public_ctx->__use_color)
++#if HILITE_SEARCH
++#	define hilite_search		(less_public_ctx->__hilite_search)
++#endif
++#	define tty					(less_public_ctx->__tty)
++#else
+ extern int quiet;               /* If VERY_QUIET, use visual bell for bell */
+ extern int no_back_scroll;
+ extern int swindow;
+@@ -290,6 +374,75 @@ extern DWORD console_mode;
+ #else
+ extern int tty;
+ #endif
++#endif
++
++#ifdef __VSF__
++struct __less_screen_ctx {
++#if !MSDOS_COMPILER
++	char*__sc_pad,
++		*__sc_home,
++		*__sc_addline,
++		*__sc_lower_left,
++		*__sc_return,
++		*__sc_move,
++		*__sc_clear,
++		*__sc_eol_clear,
++		*__sc_eos_clear,
++		*__sc_s_in,
++		*__sc_s_out,
++		*__sc_u_in,
++		*__sc_u_out,
++		*__sc_b_in,
++		*__sc_b_out,
++		*__sc_bl_in,
++		*__sc_bl_out,
++		*__sc_visual_bell,
++		*__sc_backspace,
++		*__sc_s_keypad,
++		*__sc_e_keypad,
++		*__sc_s_mousecap,
++		*__sc_e_mousecap,
++		*__sc_init,
++		*__sc_deinit;
++	int __attrcolor;			// = -1;
++	int __hardcopy;
++	int __costcount;
++#endif
++	int __init_done;
++	int __attrmode;
++	int __termcap_debug;		// = -1;
++
++	struct {
++		int __curr_on;
++	} raw_mode;
++	struct {
++		struct env {
++			struct env *next;
++			char *name;
++			char *value;
++		} *__envs;
++	} ltget_env;
++	struct {
++		char __tbuf[40];
++	} special_key_str;
++	struct {
++		char __termbuf[TERMBUF_SIZE];
++		char __sbuf[TERMSBUF_SIZE];
++	} get_term;
++};
++static void _less_screen_mod_init(void *ctx)
++{
++	struct __less_screen_ctx *__less_screen_ctx = ctx;
++	__less_screen_ctx->__attrcolor = -1;
++	__less_screen_ctx->__termcap_debug = -1;
++}
++define_vsf_less_mod(less_screen,
++	sizeof(struct __less_screen_ctx),
++	VSF_LESS_MOD_SCREEN,
++	_less_screen_mod_init
++)
++#	define less_screen_ctx		((struct __less_screen_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_screen)))
++#endif
+ 
+ extern char *tgetstr();
+ extern char *tgoto();
+@@ -310,7 +463,11 @@ extern char *tgoto();
+ raw_mode(on)
+ 	int on;
+ {
++#ifdef __VSF__
++#	define curr_on				(less_screen_ctx->raw_mode.__curr_on)
++#else
+ 	static int curr_on = 0;
++#endif
+ 
+ 	if (on == curr_on)
+ 			return;
+@@ -663,13 +820,20 @@ raw_mode(on)
+ #endif
+ #endif
+ 	curr_on = on;
++#ifdef __VSF__
++#	undef curr_on
++#endif
+ }
+ 
+ #if !MSDOS_COMPILER
+ /*
+  * Some glue to prevent calling termcap functions if tgetent() failed.
+  */
++#ifdef __VSF__
++#	define hardcopy				(less_screen_ctx->__hardcopy)
++#else
+ static int hardcopy;
++#endif
+ 
+ 	static char *
+ ltget_env(capname)
+@@ -679,8 +843,12 @@ ltget_env(capname)
+ 
+ 	if (termcap_debug)
+ 	{
++#ifdef __VSF__
++#	define envs					(less_screen_ctx->ltget_env.__envs)
++#else
+ 		struct env { struct env *next; char *name; char *value; };
+ 		static struct env *envs = NULL;
++#endif
+ 		struct env *p;
+ 		for (p = envs;  p != NULL;  p = p->next)
+ 			if (strcmp(p->name, capname) == 0)
+@@ -692,6 +860,9 @@ ltget_env(capname)
+ 		p->next = envs;
+ 		envs = p;
+ 		return p->value;
++#ifdef __VSF__
++#	undef envs
++#endif
+ 	}
+ 	SNPRINTF1(name, sizeof(name), "LESS_TERMCAP_%s", capname);
+ 	return (lgetenv(name));
+@@ -920,7 +1091,11 @@ delay(msec)
+ special_key_str(key)
+ 	int key;
+ {
++#ifdef __VSF__
++#	define tbuf					(less_screen_ctx->special_key_str.__tbuf)
++#else
+ 	static char tbuf[40];
++#endif
+ 	char *s;
+ #if MSDOS_COMPILER || OS2
+ 	static char k_right[]           = { '\340', PCK_RIGHT, 0 };
+@@ -1093,6 +1268,9 @@ special_key_str(key)
+ 		return (NULL);
+ 	}
+ 	return (s);
++#ifdef __VSF__
++#	undef tbuf
++#endif
+ }
+ 
+ /*
+@@ -1171,8 +1349,13 @@ get_term(VOID_PARAM)
+ 	 * Some termcap libraries assume termbuf is static
+ 	 * (accessible after tgetent returns).
+ 	 */
++#ifdef __VSF__
++#	define termbuf				(less_screen_ctx->get_term.__termbuf)
++#	define sbuf					(less_screen_ctx->get_term.__sbuf)
++#else
+ 	static char termbuf[TERMBUF_SIZE];
+ 	static char sbuf[TERMSBUF_SIZE];
++#endif
+ 
+ #if OS2
+ 	/*
+@@ -1394,6 +1577,10 @@ get_term(VOID_PARAM)
+ 		 */
+ 		no_back_scroll = 1;
+ 	}
++#ifdef __VSF__
++#	undef termbuf
++#	undef sbuf
++#endif
+ }
+ #endif /* MSDOS_COMPILER */
+ }
+@@ -1406,7 +1593,11 @@ get_term(VOID_PARAM)
+  * This tells us how many chars would be printed by using this string.
+  * {{ Couldn't we just use strlen? }}
+  */
++#ifdef __VSF__
++#	define costcount			(less_screen_ctx->__costcount)
++#else
+ static int costcount;
++#endif
+ 
+ /*ARGSUSED*/
+ 	static int
+diff --git a/search.c b/search.c
+index 224bc49..18869d5 100644
+--- a/search.c
++++ b/search.c
+@@ -19,6 +19,25 @@
+ #define MINPOS(a,b)     (((a) < (b)) ? (a) : (b))
+ #define MAXPOS(a,b)     (((a) > (b)) ? (a) : (b))
+ 
++#ifdef __VSF__
++#	define sigs					(less_public_ctx->__sigs)
++#	define how_search			(less_public_ctx->__how_search)
++#	define caseless				(less_public_ctx->__caseless)
++#	define linenums				(less_public_ctx->__linenums)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define jump_sline			(less_public_ctx->__jump_sline)
++#	define bs_mode				(less_public_ctx->__bs_mode)
++#	define ctldisp				(less_public_ctx->__ctldisp)
++#	define status_col			(less_public_ctx->__status_col)
++#	define ml_search			(less_public_ctx->__ml_search)
++#	define start_attnpos		(less_public_ctx->__start_attnpos)
++#	define end_attnpos			(less_public_ctx->__end_attnpos)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define hshift				(less_public_ctx->__hshift)
++#else
+ extern int sigs;
+ extern int how_search;
+ extern int caseless;
+@@ -36,7 +55,19 @@ extern int screen_trashed;
+ extern int sc_width;
+ extern int sc_height;
+ extern int hshift;
++#endif
+ #if HILITE_SEARCH
++#ifdef __VSF__
++#	define hilite_search		(less_public_ctx->__hilite_search)
++#	define size_linebuf			(less_public_ctx->__size_linebuf)
++#	define squished				(less_public_ctx->__squished)
++#	define can_goto_line		(less_public_ctx->__can_goto_line)
++#	define xxpos				(less_public_ctx->__xxpos)
++
++#	define hide_hilite			(less_search_ctx->__hide_hilite)
++#	define prep_startpos		(less_search_ctx->__prep_startpos)
++#	define prep_endpos			(less_search_ctx->__prep_endpos)
++#else
+ extern int hilite_search;
+ extern int size_linebuf;
+ extern int squished;
+@@ -45,6 +76,7 @@ static int hide_hilite;
+ static POSITION prep_startpos;
+ static POSITION prep_endpos;
+ extern POSITION xxpos;
++#endif
+ 
+ /*
+  * Structures for maintaining a set of ranges for hilites and filtered-out
+@@ -94,9 +126,15 @@ struct hilite_tree
+ #define HILITE_INITIALIZER() { NULL, NULL, NULL, NULL }
+ #define HILITE_LOOKASIDE_STEPS 2
+ 
++#ifdef __VSF__
++#	define hilite_anchor		(less_search_ctx->__hilite_anchor)
++#	define filter_anchor		(less_search_ctx->__filter_anchor)
++#	define filter_infos			(less_search_ctx->__filter_infos)
++#else
+ static struct hilite_tree hilite_anchor = HILITE_INITIALIZER();
+ static struct hilite_tree filter_anchor = HILITE_INITIALIZER();
+ static struct pattern_info *filter_infos = NULL;
++#endif
+ 
+ #endif
+ 
+@@ -117,9 +155,34 @@ struct pattern_info {
+ #define info_compiled(info) ((info)->compiled)
+ #endif
+ 	
++#ifdef __VSF__
++#	define search_info			(less_search_ctx->__search_info)
++#	define is_ucase_pattern		(less_search_ctx->__is_ucase_pattern)
++#	define is_caseless			(less_public_ctx->__is_caseless)
++#else
+ static struct pattern_info search_info;
+ static int is_ucase_pattern;
+ public int is_caseless;
++#endif
++
++#ifdef __VSF__
++struct __less_search_ctx {
++	int __hide_hilite;
++	POSITION __prep_startpos;
++	POSITION __prep_endpos;
++	struct hilite_tree __hilite_anchor;
++	struct hilite_tree __filter_anchor;
++	struct pattern_info *__filter_infos;
++	struct pattern_info __search_info;
++	int __is_ucase_pattern;
++};
++define_vsf_less_mod(less_search,
++	sizeof(struct __less_search_ctx),
++	VSF_LESS_MOD_SEARCH,
++	NULL
++)
++#	define less_search_ctx		((struct __less_search_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_search)))
++#endif
+ 
+ /*
+  * Are there any uppercase letters in this string?
+diff --git a/signal.c b/signal.c
+index 294fa6a..03f0e4b 100644
+--- a/signal.c
++++ b/signal.c
+@@ -21,6 +21,19 @@
+ #include "less.h"
+ #include <signal.h>
+ 
++#ifdef __VSF__
++#	define sigs					(less_public_ctx->__sigs)
++#	define sc_width				(less_public_ctx->__sc_width)
++#	define sc_height			(less_public_ctx->__sc_height)
++#	define screen_trashed		(less_public_ctx->__screen_trashed)
++#	define lnloop				(less_public_ctx->__lnloop)
++#	define linenums				(less_public_ctx->__linenums)
++#	define wscroll				(less_public_ctx->__wscroll)
++#	define reading				(less_public_ctx->__reading)
++#	define quit_on_intr			(less_public_ctx->__quit_on_intr)
++#	define secure				(less_public_ctx->__secure)
++#	define jump_sline_fraction	(less_public_ctx->__jump_sline_fraction)
++#else
+ /*
+  * "sigs" contains bits indicating signals which need to be processed.
+  */
+@@ -35,6 +48,7 @@ extern int reading;
+ extern int quit_on_intr;
+ extern int secure;
+ extern long jump_sline_fraction;
++#endif
+ 
+ /*
+  * Interrupt signal handler.
+diff --git a/tags.c b/tags.c
+index 03e2973..ab61cb5 100644
+--- a/tags.c
++++ b/tags.c
+@@ -14,7 +14,16 @@
+ 
+ #if TAGS
+ 
+-public char ztags[] = "tags";
++public const char ztags[] = "tags";
++#ifdef __VSF__
++#	define tags					(less_public_ctx->__tags)
++#	define linenums				(less_public_ctx->__linenums)
++#	define sigs					(less_public_ctx->__sigs)
++#	define ctldisp				(less_public_ctx->__ctldisp)
++
++#	define total				(less_tags_ctx->__total)
++#	define curseq				(less_tags_ctx->__curseq)
++#else
+ public char *tags = ztags;
+ 
+ static int total;
+@@ -23,6 +32,7 @@ static int curseq;
+ extern int linenums;
+ extern int sigs;
+ extern int ctldisp;
++#endif
+ 
+ enum tag_result {
+ 	TAG_FOUND,
+@@ -71,15 +81,44 @@ struct tag {
+ 	char *tag_pattern;      /* Pattern used to find the tag */
+ 	char tag_endline;       /* True if the pattern includes '$' */
+ };
+-#define TAG_END  ((struct tag *) &taglist)
+-static struct taglist taglist = { TAG_END, TAG_END };
++#define TAG_END  ((struct tag *) &__taglist)
++#ifdef __VSF__
++#	define __taglist			(less_tags_ctx->____taglist)
++#	define curtag				(less_tags_ctx->__curtag)
++#else
++static struct taglist __taglist = { TAG_END, TAG_END };
+ static struct tag *curtag;
++#endif
++
++#ifdef __VSF__
++struct __less_tags_ctx {
++	struct taglist ____taglist;		// = { TAG_END, TAG_END };
++	struct tag *__curtag;
++	int __total;
++	int __curseq;
++	int __circular;
++};
++static void __less_tags_mod_init(void *ctx)
++{
++	struct __less_tags_ctx *__less_tags_ctx = ctx;
++	__less_tags_ctx->____taglist = (struct taglist) {
++		(struct tag *)&__less_tags_ctx->____taglist,
++		(struct tag *)&__less_tags_ctx->____taglist
++	};
++}
++define_vsf_less_mod(less_tags,
++	sizeof(struct __less_tags_ctx),
++	VSF_LESS_MOD_TAGS,
++	__less_tags_mod_init
++)
++#	define less_tags_ctx		((struct __less_tags_ctx *)vsf_linux_dynlib_ctx(&vsf_less_mod_name(less_tags)))
++#endif
+ 
+ #define TAG_INS(tp) \
+ 	(tp)->next = TAG_END; \
+-	(tp)->prev = taglist.tl_last; \
+-	taglist.tl_last->next = (tp); \
+-	taglist.tl_last = (tp);
++	(tp)->prev = __taglist.tl_last; \
++	__taglist.tl_last->next = (tp); \
++	__taglist.tl_last = (tp);
+ 
+ #define TAG_RM(tp) \
+ 	(tp)->next->prev = (tp)->prev; \
+@@ -98,7 +137,7 @@ cleantags(VOID_PARAM)
+ 	 * {{ Ideally, we wouldn't do this until after we know that we
+ 	 *    can load some other tag information. }}
+ 	 */
+-	while ((tp = taglist.tl_first) != TAG_END)
++	while ((tp = __taglist.tl_first) != TAG_END)
+ 	{
+ 		TAG_RM(tp);
+ 		free(tp->tag_file);
+@@ -379,7 +418,7 @@ findctag(tag)
+ 	fclose(f);
+ 	if (total == 0)
+ 		return TAG_NOTAG;
+-	curtag = taglist.tl_first;
++	curtag = __taglist.tl_first;
+ 	curseq = 1;
+ 	return TAG_FOUND;
+ }
+@@ -528,7 +567,7 @@ findgtag(tag, type)
+ 	{
+ 		fp = stdin;
+ 		/* Set tag default because we cannot read stdin again. */
+-		tags = ztags;
++		tags = (char *)ztags;
+ 	} else
+ 	{
+ #if !HAVE_POPEN
+@@ -625,7 +664,7 @@ findgtag(tag, type)
+ 	}
+ 
+ 	/* Check to see if we found anything. */
+-	tp = taglist.tl_first;
++	tp = __taglist.tl_first;
+ 	if (tp == TAG_END)
+ 		return TAG_NOTAG;
+ 	curtag = tp;
+@@ -633,7 +672,11 @@ findgtag(tag, type)
+ 	return TAG_FOUND;
+ }
+ 
++#ifdef __VSF__
++#	define circular				(less_tags_ctx->__circular)
++#else
+ static int circular = 0;        /* 1: circular tag structure */
++#endif
+ 
+ /*
+  * Return the filename required for the next gtag in the queue that was setup
+@@ -655,7 +698,7 @@ nextgtag(VOID_PARAM)
+ 		if (!circular)
+ 			return NULL;
+ 		/* Wrapped around to the head of the queue */
+-		curtag = taglist.tl_first;
++		curtag = __taglist.tl_first;
+ 		curseq = 1;
+ 	} else
+ 	{
+@@ -685,7 +728,7 @@ prevgtag(VOID_PARAM)
+ 		if (!circular)
+ 			return NULL;
+ 		/* Wrapped around to the tail of the queue */
+-		curtag = taglist.tl_last;
++		curtag = __taglist.tl_last;
+ 		curseq = total;
+ 	} else
+ 	{
+diff --git a/ttyin.c b/ttyin.c
+index 4be4527..0d67847 100644
+--- a/ttyin.c
++++ b/ttyin.c
+@@ -26,15 +26,25 @@
+ public DWORD console_mode;
+ public HANDLE tty;
+ #else
++#ifdef __VSF__
++#	define tty					(less_public_ctx->__tty)
++#else
+ public int tty;
+ #endif
++#endif
+ #if LESSTEST
+ public char *ttyin_name = NULL;
+ public int rstat_file = -1;
+ #endif /*LESSTEST*/
++#ifdef __VSF__
++#	define sigs					(less_public_ctx->__sigs)
++#	define utf_mode				(less_public_ctx->__utf_mode)
++#	define wheel_lines			(less_public_ctx->__wheel_lines)
++#else
+ extern int sigs;
+ extern int utf_mode;
+ extern int wheel_lines;
++#endif
+ 
+ #if !MSDOS_COMPILER
+ 	static int
+diff --git a/version.c b/version.c
+index f28ff8d..de591f1 100644
+--- a/version.c
++++ b/version.c
+@@ -947,4 +947,4 @@ v599  12/28/21  Defer moving to lower left in some cases;
+ v600  1/7/22    Use /dev/tty if cannot open ttyname().
+ */
+ 
+-char version[] = "600";
++const char version[] = "600";
