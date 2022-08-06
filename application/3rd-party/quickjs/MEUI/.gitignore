@@ -1,0 +1,10 @@
+*.o
+*.s
+.*.cmd
+*.sym
+*.asm
+fixdep*
+/meui*
+/.vscode
+/node_modules
+/dist
