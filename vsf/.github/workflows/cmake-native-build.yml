@@ -1,0 +1,52 @@
+name: vsf cmake native build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+jobs:
+  cmake-native-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+        os: [ubuntu-latest, macos-12]
+
+    runs-on: ${{matrix.os}}
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true # without recursive
+
+    - name: install depends
+      run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential clang ninja-build libsdl2-dev libusb-dev libusb-1.0 python3 python3-pip
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install gcc llvm sdl2 libusb ninja
+          fi
+          pip3 install pytest pytest-bdd pexpect simple-hexdump
+      shell: bash
+
+    - name: configure cmake
+      run: cmake -GNinja -S ${SOURCE_PATH} -B ${SOURCE_PATH}/build
+      env:
+        CC: ${{matrix.cc}}
+        VSF_PATH: ${{github.workspace}}
+        SOURCE_PATH: ${{github.workspace}}/example/template/project/cmake/linux
+
+    - name: build
+      # Build your program with the given configuration
+      run: cmake --build ${SOURCE_PATH}/build -v
+      env:
+        SOURCE_PATH: ${{github.workspace}}/example/template/project/cmake/linux
+
+    - name: test
+      run: pytest -m "base or memory or linux-only" --verbose -o log_cli=true --log-cli-level="DEBUG" --vsf_template=${{github.workspace}}/example/template/project/cmake/linux/build/vsf_template
+      working-directory: ${{github.workspace}}/test/pytest
