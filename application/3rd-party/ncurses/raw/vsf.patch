@@ -1,0 +1,137 @@
+ Ada95/gen/gen.c              | 3 +++
+ Ada95/src/c_varargs_to_ada.h | 3 +++
+ c++/internal.h               | 3 +++
+ menu/mf_common.h             | 3 +++
+ ncurses/build.priv.h         | 3 +++
+ ncurses/curses.priv.h        | 3 +++
+ panel/panel.priv.h           | 3 +++
+ progs/progs.priv.h           | 3 +++
+ test/test.priv.h             | 3 +++
+ 9 files changed, 27 insertions(+)
+
+diff --git a/Ada95/gen/gen.c b/Ada95/gen/gen.c
+index 51bc161a..fc1303e5 100644
+--- a/Ada95/gen/gen.c
++++ b/Ada95/gen/gen.c
+@@ -51,6 +51,9 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ 
+ #include <menu.h>
+ #include <form.h>
+diff --git a/Ada95/src/c_varargs_to_ada.h b/Ada95/src/c_varargs_to_ada.h
+index 8b782192..f6c3a5eb 100644
+--- a/Ada95/src/c_varargs_to_ada.h
++++ b/Ada95/src/c_varargs_to_ada.h
+@@ -39,6 +39,9 @@
+ #endif
+ 
+ #include <stdlib.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ 
+ #include <form.h>
+ 
+diff --git a/c++/internal.h b/c++/internal.h
+index f67aaec3..ec8590d5 100644
+--- a/c++/internal.h
++++ b/c++/internal.h
+@@ -57,6 +57,9 @@
+ #ifndef _QNX_SOURCE
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #endif
+ 
+ #ifndef CTRL
+diff --git a/menu/mf_common.h b/menu/mf_common.h
+index fcbd565c..8934ae41 100644
+--- a/menu/mf_common.h
++++ b/menu/mf_common.h
+@@ -45,6 +45,9 @@
+ #include <sys/types.h>
+ #include <assert.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #include <ctype.h>
+ #include <errno.h>
+ 
+diff --git a/ncurses/build.priv.h b/ncurses/build.priv.h
+index 9014e74a..1f20b6b1 100644
+--- a/ncurses/build.priv.h
++++ b/ncurses/build.priv.h
+@@ -60,6 +60,9 @@ extern "C" {
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #include <sys/types.h>
+ 
+ #include <assert.h>
+diff --git a/ncurses/curses.priv.h b/ncurses/curses.priv.h
+index 872d25af..7ed75259 100644
+--- a/ncurses/curses.priv.h
++++ b/ncurses/curses.priv.h
+@@ -65,6 +65,9 @@ extern "C" {
+ #include <stddef.h>		/* for offsetof */
+ #include <stdlib.h>
+ #include <string.h>
++	#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ 
+diff --git a/panel/panel.priv.h b/panel/panel.priv.h
+index 029a4f33..8b760690 100644
+--- a/panel/panel.priv.h
++++ b/panel/panel.priv.h
+@@ -39,6 +39,9 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #include <assert.h>
+ 
+ struct screen;              /* forward declaration */
+diff --git a/progs/progs.priv.h b/progs/progs.priv.h
+index 32f4e4e8..c8463181 100644
+--- a/progs/progs.priv.h
++++ b/progs/progs.priv.h
+@@ -52,6 +52,9 @@
+ #include <stdlib.h>
+ #include <ctype.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #include <sys/types.h>
+ 
+ #if HAVE_UNISTD_H
+diff --git a/test/test.priv.h b/test/test.priv.h
+index 58f79e00..9f3312a4 100644
+--- a/test/test.priv.h
++++ b/test/test.priv.h
+@@ -369,6 +369,9 @@
+ #include <stdlib.h>
+ #include <stdarg.h>
+ #include <string.h>
++#ifdef __VSF__
++#	include "ncurses_port_vsf.h"
++#endif
+ #include <sys/types.h>
+ #include <errno.h>
+ 
