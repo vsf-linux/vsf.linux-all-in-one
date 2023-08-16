@@ -1,0 +1,321 @@
+#ifndef __SIMPLE_LIBC_STRING_VIEW__
+#define __SIMPLE_LIBC_STRING_VIEW__
+
+#include <compare>
+
+namespace std {
+    template <class T, class Traits = char_traits<T>>
+    class basic_string_view {
+    private:
+        const T *__str;
+        size_t __length;
+
+    public:
+        typedef Traits traits_type;
+
+        typedef T value_type;
+        typedef size_t size_type;
+        typedef ptrdiff_t difference_type;
+        typedef T * pointer;
+        typedef const T * const_pointer;
+        typedef T & reference;
+        typedef const T & const_reference;
+
+        typedef T * iterator;
+        typedef const T * const_iterator;
+        typedef std::reverse_iterator<iterator> reverse_iterator;
+        typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+
+        static const size_t npos = -1;
+
+        constexpr basic_string_view<T, Traits>(const T *str) : __str(str), __length(__strlen(str)) { }
+        constexpr basic_string_view<T, Traits>(const basic_string_view<T, Traits> &s) : __str(s.cbegin()), __length(s.length) { }
+        constexpr basic_string_view<T, Traits>() : __str(nullptr), __length(0) { }
+        constexpr basic_string_view<T, Traits>(const T *str, size_t num) : __str(str), __length(num) { }
+
+        constexpr iterator begin() const
+        {
+            return __str == nullptr ? (iterator)nullptr : (iterator)&__str[0];
+        }
+        constexpr iterator end() const
+        {
+            return __str == nullptr ? (iterator)nullptr : (iterator)&__str[__length];
+        }
+        constexpr const_iterator cbegin() const
+        {
+            return (const_iterator)begin();
+        }
+        constexpr const_iterator cend() const
+        {
+            return (const_iterator)end();
+        }
+        constexpr iterator rbegin() const
+        {
+            return __length > 0 ? &__str[__length - 1] : nullptr;
+        }
+        constexpr iterator rend() const
+        {
+            return __length > 0 ? &__str[-1] : nullptr;
+        }
+        constexpr const_iterator crbegin() const
+        {
+            return (const_iterator)rbegin();
+        }
+        constexpr const_iterator crend() const
+        {
+            return (const_iterator)rend();
+        }
+
+        constexpr bool empty() const
+        {
+            return (0 == __length);
+        }
+        constexpr const T & at(size_t pos) const
+        {
+            VSF_ASSERT(pos < __length);
+            return __str[pos];
+        }
+        constexpr const T & back() const
+        {
+            return at(__length);
+        }
+        constexpr const T & front() const
+        {
+            return at(0);
+        }
+        constexpr size_t size() const
+        {
+            return __length;
+        }
+        constexpr size_t length() const
+        {
+            return __length;
+        }
+        constexpr const T * data() const
+        {
+            return cbegin();
+        }
+        constexpr basic_string_view<T, Traits> & assign(const T *str, size_t num)
+        {
+            __str = str;
+            __length = num;
+            return (*this);
+        }
+        constexpr basic_string_view<T, Traits> & assign(const basic_string_view<T, Traits> &str)
+        {
+            return assign(str.cbegin(), str.length());
+        }
+        constexpr basic_string_view<T, Traits> & assign(const T *str)
+        {
+            return assign(str, __strlen(str));
+        }
+        constexpr int compare(const basic_string_view<T, Traits> & right) const
+        {
+            size_t lsize = length(), rsize = right.length();
+            size_t len = vsf_min(lsize, rsize) + 1;
+            return Traits::compare(__str, right.c_str(), len);
+        }
+        constexpr basic_string_view<T, Traits> & substr(size_t start = 0, size_t count = npos) const
+        {
+            size_t len = length();
+            if (start >= len) {
+                count = 0;
+            }
+            if ((count == npos) || (start + count > len)) {
+                count = len - start;
+            }
+
+            const T *sub = cbegin();
+            basic_string_view<T, Traits> *newstr = new basic_string_view<T, Traits>(&sub[start], count + 1);
+            return (*newstr);
+        }
+        constexpr size_t find(const T *str, size_t pos = 0) const
+        {
+            const T *start = cbegin();
+            if (pos < length()) {
+                T *found = __strstr(start + pos, str);
+                if (found) {
+                    return (found - start) / sizeof(T);
+                }
+            }
+            return npos;
+        }
+        constexpr size_t find(const basic_string_view<T, Traits> &str, size_t pos = 0) const
+        {
+            return find(str.c_str(), pos);
+        }
+        constexpr size_t find(T c, size_t pos = 0) const
+        {
+            T str[2] = { c, T(0) };
+            return find(str, pos);
+        }
+
+        constexpr size_t find_first_of(const T *str, size_t pos = 0) const
+        {
+            const T *start = cbegin();
+            ssize_t curpos = pos, slen = length();
+            if (pos >= slen) {
+                return npos;
+            }
+
+            while (curpos < slen) {
+                if (__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos++;
+            }
+            return curpos < slen ? curpos : npos;
+        }
+        constexpr size_t find_first_of(const basic_string_view<T, Traits> & str, size_t pos = 0) const
+        {
+            return find_first_of(str.cbegin(), pos);
+        }
+        constexpr size_t find_first_of(char c, size_t pos = 0) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_first_of(str, pos);
+        }
+        constexpr size_t find_first_not_of(const T *str, size_t pos = 0) const
+        {
+            const T *start = cbegin();
+            ssize_t curpos = pos, slen = length();
+            if (pos >= slen) {
+                return npos;
+            }
+
+            while (curpos < slen) {
+                if (!__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos++;
+            }
+            return curpos < slen ? curpos : npos;
+        }
+        constexpr size_t find_first_not_of(const basic_string_view<T, Traits> & str, size_t pos = 0) const
+        {
+            return find_first_not_of(str.cbegin(), pos);
+        }
+        constexpr size_t find_first_not_of(char c, size_t pos = 0) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_first_not_of(str, pos);
+        }
+
+        constexpr size_t find_last_of(const T *str, size_t pos = npos) const
+        {
+            const T *start = cbegin();
+            if (nullptr == start) {
+                assert(false);
+            }
+
+            ssize_t curpos = length() - 1;
+            if (pos > curpos) {
+                pos = curpos;
+            }
+
+            while (curpos >= 0) {
+                if (__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos--;
+            }
+            return curpos >= 0 ? curpos : npos;
+        }
+        constexpr size_t find_last_of(const basic_string_view<T, Traits> & str, size_t pos = npos) const
+        {
+            return find_last_of(str.cbegin(), pos);
+        }
+        constexpr size_t find_last_of(char c, size_t pos = npos) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_last_of(str, pos);
+        }
+        constexpr size_t find_last_not_of(const T *str, size_t pos = npos) const
+        {
+            const T *start = cbegin();
+            if (nullptr == start) {
+                return npos;
+            }
+
+            ssize_t curpos = length() - 1;
+            if (pos > curpos) {
+                pos = curpos;
+            }
+
+            while (curpos >= 0) {
+                if (!__strchr(str, start[curpos])) {
+                    break;
+                }
+                curpos--;
+            }
+            return curpos >= 0 ? curpos : npos;
+        }
+        constexpr size_t find_last_not_of(const basic_string_view<T, Traits> & str, size_t pos = npos) const
+        {
+            return find_last_not_of(str.cbegin(), pos);
+        }
+        constexpr size_t find_last_not_of(char c, size_t pos = npos) const
+        {
+            const T str[2] = { c, T(0) };
+            return find_last_not_of(str, pos);
+        }
+
+        constexpr basic_string_view<T, Traits> & operator =(const T *s)
+        {
+            size_t size = (nullptr == s) ? 1 : __strlen(s) + 1;
+            return (basic_string_view<T, Traits> &)(assign(s, size));
+        }
+        constexpr basic_string_view<T, Traits> & operator =(const basic_string_view<T, Traits> &s)
+        {
+            return operator =(s.cbegin());
+        }
+        constexpr bool operator ==(const T *str) const
+        {
+            size_t len = str != nullptr ? __strlen(str) : 0;
+            return (length() == len) && !__memcmp(cbegin(), str, len);
+        }
+        constexpr bool operator ==(const basic_string_view<T, Traits> &str) const
+        {
+            return operator ==(str.cbegin());
+        }
+        constexpr bool operator !=(const T *str) const
+        {
+            return !operator ==(str);
+        }
+        constexpr bool operator !=(const basic_string_view<T, Traits> &str) const
+        {
+            return !operator ==(str);
+        }
+        constexpr bool operator >(const T *str) const
+        {
+            size_t slen = str != nullptr ? __strlen(str) : 0;
+            size_t len = vsf_min(slen, length());
+            return __memcmp(cbegin(), str, len) > 0;
+        }
+        constexpr bool operator >(const basic_string_view<T, Traits> &str) const
+        {
+            return operator >(str.cbegin());
+        }
+        constexpr bool operator <(const T *str) const
+        {
+            size_t slen = str != nullptr ? __strlen(str) : 0;
+            size_t len = vsf_min(slen, length());
+            return __memcmp(cbegin(), str, len) < 0;
+        }
+        constexpr bool operator <(const basic_string_view<T, Traits> &str) const
+        {
+            return operator <(str.cbegin());
+        }
+        constexpr const T & operator [](size_t pos) const
+        {
+            return at(pos);
+        }
+    };
+
+    typedef basic_string_view<char, char_traits<char>> string_view;
+    typedef basic_string_view<wchar_t, char_traits<wchar_t>> wstring_view;
+    typedef basic_string_view<char16_t, char_traits<char16_t>> u16string_view;
+    typedef basic_string_view<char32_t, char_traits<char32_t>> u32string_view;
+}
+
+#endif      // __SIMPLE_LIBC_STRING_VIEW__
