@@ -1,0 +1,18 @@
+# CMakeLists head
+
+add_subdirectory(adc)
+add_subdirectory(dac)
+add_subdirectory(dma)
+add_subdirectory(flash)
+add_subdirectory(gpio)
+add_subdirectory(i2c)
+add_subdirectory(io)
+add_subdirectory(pwm)
+add_subdirectory(rng)
+add_subdirectory(rtc)
+add_subdirectory(spi)
+add_subdirectory(timer)
+add_subdirectory(usart)
+add_subdirectory(mmc)
+add_subdirectory(i2s)
+add_subdirectory(wdt)
