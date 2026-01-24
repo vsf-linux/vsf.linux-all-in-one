@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "Xtensa",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${env:VSF_PATH}/source/vsf",
+                "${env:IDF_PATH}/components/freertos/include/freertos",
+                "${workspaceFolder}/../../../config"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "__ESP32S2__"
+            ],
+            "windowsSdkVersion": "10.0.18362.0",
+            "cStandard": "gnu11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm",
+            "compilerArgs": [
+                "__CPU_XTENSA__"
+            ]
+        }
+    ],
+    "version": 4
+}
